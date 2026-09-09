@@ -9,12 +9,12 @@ beforeEach(() => {
     dataDirectory: { getInfo: vi.fn(async () => ({ path: 'D:\\知己', writable: true, fileCount: 6, totalBytes: 100, categories: { journals: 3, reviews: 2, projects: 1, profile: 0, settings: 0 } })), open: vi.fn(async () => undefined), pickFolder: vi.fn(async () => ({ canceled: true })), changeLocation: vi.fn() },
     transfer: { exportBackup: vi.fn(async () => ({ canceled: true })), previewRestore: vi.fn(async () => ({ canceled: true })), restore: vi.fn(async () => ({ fileCount: 0 })) },
     templates: { list: vi.fn(async () => []), get: vi.fn(), save: vi.fn(), delete: vi.fn() },
-     app: { getInfo: vi.fn(async () => ({ version: '2.6.5' })) },
+     app: { getInfo: vi.fn(async () => ({ version: '2.6.6' })) },
     settings: {
       getPublicConfig: vi.fn(async () => ({ providerId: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5-mini', agentThinking: 'disabled' as const, hasApiKey: true })),
       save: vi.fn(async () => ({ providerId: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5-mini', agentThinking: 'disabled' as const, hasApiKey: true })),
       clearApiKey: vi.fn(async () => ({ providerId: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5-mini', agentThinking: 'disabled' as const, hasApiKey: false })),
-      testConnection: vi.fn(async () => undefined),
+      testConnection: vi.fn(async () => ({ providerId: 'openai', model: 'gpt-5-mini', finishReason: 'stop', outputLength: 11, jsonValid: true, usage: { inputTokens: 14, outputTokens: 4, cachedInputTokens: null }, reasoningPresent: false, refusalPresent: false })),
     },
   } as unknown as Window['zhiji'];
 });
@@ -58,7 +58,7 @@ describe('SettingsPage', () => {
 
   it('keeps save and test actions independently addressable', async () => {
     let finishTest!: () => void;
-    vi.mocked(window.zhiji.settings.testConnection).mockReturnValueOnce(new Promise<void>((resolve) => { finishTest = resolve; }));
+    vi.mocked(window.zhiji.settings.testConnection).mockReturnValueOnce(new Promise((resolve) => { finishTest = () => resolve({ providerId: 'openai', model: 'gpt-5-mini', finishReason: 'stop', outputLength: 11, jsonValid: true, usage: null, reasoningPresent: false, refusalPresent: false }); }));
     render(<SettingsPage initialSection="ai"/>);
     await screen.findByText(/已安全保存/);
     fireEvent.click(screen.getByText('高级设置'));
@@ -68,6 +68,7 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('button', { name: '仅保存' })).toBeEnabled();
     finishTest();
     await waitFor(() => expect(screen.getByText(/连接成功/)).toBeInTheDocument());
+    expect(screen.getByLabelText('AI 连接诊断')).toHaveTextContent('JSON 校验通过');
   });
 
   it('persists a working provider configuration after a successful connection test', async () => {
@@ -82,6 +83,22 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(window.zhiji.settings.testConnection).toHaveBeenCalledWith(expected));
     expect(window.zhiji.settings.save).toHaveBeenCalledWith(expected);
     expect(onSaved).toHaveBeenCalled();
+  });
+
+  it('shows safe structured diagnostics when the connection probe returns unusable JSON', async () => {
+    const failure = Object.assign(new Error('连接已建立，但结构化响应未通过校验。'), {
+      code: 'INVALID_MODEL_OUTPUT',
+      diagnostics: { kind: 'invalid_json' as const, finishReason: 'stop', outputLength: 7, schemaPaths: [], at: '2026-09-09T00:00:00.000Z', maxTokens: 32, attempt: 1, providerId: 'openai', model: 'gpt-5-mini', inputTokens: 10, outputTokens: 7, cachedInputTokens: null, reasoningPresent: false, refusalPresent: false },
+    });
+    vi.mocked(window.zhiji.settings.testConnection).mockRejectedValueOnce(failure);
+    render(<SettingsPage initialSection="ai"/>);
+    await screen.findByText(/已安全保存/);
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存并测试' }));
+    expect(await screen.findByText('操作失败：连接已建立，但结构化响应未通过校验。')).toBeInTheDocument();
+    expect(screen.getByText('JSON 无效')).toBeInTheDocument();
+    expect(window.zhiji.settings.save).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveTextContent('sk-secret');
   });
 
   it('requires explicit confirmation before removing a saved key', async () => {

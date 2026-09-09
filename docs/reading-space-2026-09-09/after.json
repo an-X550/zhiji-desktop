@@ -1,0 +1,131 @@
+[
+  {
+    "width": 1172,
+    "height": 559.6000366210938,
+    "zoom": 1,
+    "surface": "journal",
+    "font": "13px",
+    "lineHeight": "21.45px",
+    "visibleLines": 26,
+    "viewport": [
+      1440,
+      902
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false
+  },
+  {
+    "width": 1212,
+    "height": 669,
+    "zoom": 1,
+    "surface": "agent",
+    "font": "12px",
+    "lineHeight": "19.2px",
+    "visibleLines": 34,
+    "viewport": [
+      1440,
+      902
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false,
+    "body": {
+      "width": 545.25,
+      "height": 85.80000305175781,
+      "font": "13px",
+      "lineHeight": "21.45px",
+      "visibleLines": 4,
+      "viewport": [
+        1440,
+        902
+      ],
+      "sidebarFont": "14px",
+      "horizontalOverflow": false
+    }
+  },
+  {
+    "width": 884,
+    "height": 379.3599853515625,
+    "zoom": 1.25,
+    "surface": "journal",
+    "font": "13px",
+    "lineHeight": "21.45px",
+    "visibleLines": 17,
+    "viewport": [
+      1152,
+      721
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false
+  },
+  {
+    "width": 924,
+    "height": 489,
+    "zoom": 1.25,
+    "surface": "agent",
+    "font": "12px",
+    "lineHeight": "19.2px",
+    "visibleLines": 25,
+    "viewport": [
+      1152,
+      721
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false,
+    "body": {
+      "width": 545.25,
+      "height": 85.79999542236328,
+      "font": "13px",
+      "lineHeight": "21.45px",
+      "visibleLines": 4,
+      "viewport": [
+        1152,
+        721
+      ],
+      "sidebarFont": "14px",
+      "horizontalOverflow": false
+    }
+  },
+  {
+    "width": 724,
+    "height": 299.6000061035156,
+    "zoom": 1,
+    "surface": "journal",
+    "font": "13px",
+    "lineHeight": "21.45px",
+    "visibleLines": 13,
+    "viewport": [
+      960,
+      642
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false
+  },
+  {
+    "width": 764,
+    "height": 409,
+    "zoom": 1,
+    "surface": "agent",
+    "font": "12px",
+    "lineHeight": "19.2px",
+    "visibleLines": 21,
+    "viewport": [
+      960,
+      642
+    ],
+    "sidebarFont": "14px",
+    "horizontalOverflow": false,
+    "body": {
+      "width": 545.25,
+      "height": 85.80000305175781,
+      "font": "13px",
+      "lineHeight": "21.45px",
+      "visibleLines": 4,
+      "viewport": [
+        960,
+        642
+      ],
+      "sidebarFont": "14px",
+      "horizontalOverflow": false
+    }
+  }
+]

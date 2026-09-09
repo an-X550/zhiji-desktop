@@ -54,7 +54,7 @@ async function inspectingJsonEndpoint(onBody: (body: unknown) => void) {
   const server = createServer((request, response) => {
     let raw = '';
     request.on('data', (chunk) => { raw += chunk; });
-    request.on('end', () => { onBody(JSON.parse(raw)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: 'OK' } }] })); });
+    request.on('end', () => { onBody(JSON.parse(raw)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] })); });
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -63,11 +63,11 @@ async function inspectingJsonEndpoint(onBody: (body: unknown) => void) {
   return `http://127.0.0.1:${address.port}/v1`;
 }
 
-async function inspectingStructuredEndpoint(onBody: (body: unknown) => void) {
+async function inspectingStructuredEndpoint(onBody: (body: unknown) => void, payload: unknown = { choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] }) {
   const server = createServer((request, response) => {
     let raw = '';
     request.on('data', (chunk) => { raw += chunk; });
-    request.on('end', () => { onBody(JSON.parse(raw)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] })); });
+    request.on('end', () => { onBody(JSON.parse(raw)); response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify(payload)); });
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -179,8 +179,23 @@ describe('OpenAiCompatibleProvider', () => {
     let requestBody: unknown;
     const baseUrl = await inspectingJsonEndpoint((value) => { requestBody = value; });
     const provider = new OpenAiCompatibleProvider({ baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
-    await expect(provider.testConnection()).resolves.toBeUndefined();
-    expect(requestBody).toMatchObject({ model: 'deepseek-v4-flash', stream: false, max_tokens: 1 });
+    await expect(provider.testConnection()).resolves.toMatchObject({ model: 'deepseek-v4-flash', finishReason: null, outputLength: 11, jsonValid: true, usage: null, reasoningPresent: false, refusalPresent: false });
+    expect(requestBody).toMatchObject({ model: 'deepseek-v4-flash', stream: false, max_tokens: 32, response_format: { type: 'json_object' } });
+  });
+
+  it('rejects a successful HTTP response when the structured probe is unusable', async () => {
+    const baseUrl = await inspectingStructuredEndpoint(() => undefined, { choices: [{ message: { content: '' }, finish_reason: 'length' }] });
+    const provider = new OpenAiCompatibleProvider({ providerId: 'deepseek', baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
+    await expect(provider.testConnection()).rejects.toMatchObject({ code: 'INVALID_MODEL_OUTPUT', diagnostics: { kind: 'truncated', providerId: 'deepseek', model: 'deepseek-v4-flash', maxTokens: 32, outputLength: 0 } });
+  });
+
+  it('returns safe usage and JSON diagnostics for a valid connectivity probe', async () => {
+    const baseUrl = await inspectingStructuredEndpoint(() => undefined, {
+      choices: [{ message: { content: '{"ok":true}', reasoning_content: 'hidden' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 21, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 3 } },
+    });
+    const provider = new OpenAiCompatibleProvider({ providerId: 'deepseek', baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
+    await expect(provider.testConnection()).resolves.toEqual({ providerId: 'deepseek', model: 'deepseek-v4-flash', finishReason: 'stop', outputLength: 11, jsonValid: true, usage: { inputTokens: 21, outputTokens: 5, cachedInputTokens: 3 }, reasoningPresent: true, refusalPresent: false });
   });
 
   it('uses a bounded non-stream JSON request and preserves finish_reason', async () => {
@@ -189,5 +204,37 @@ describe('OpenAiCompatibleProvider', () => {
     const provider = new OpenAiCompatibleProvider({ baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
     await expect(provider.collectStructured([{ role: 'user', content: 'Return JSON.' }], undefined, { maxTokens: 1200 })).resolves.toEqual({ content: '{"ok":true}', finishReason: 'stop' });
     expect(requestBody).toMatchObject({ model: 'deepseek-v4-flash', stream: false, max_tokens: 1200, response_format: { type: 'json_object' } });
+  });
+
+  it('disables DeepSeek thinking only when the structured workflow requests it', async () => {
+    let requestBody: unknown;
+    const baseUrl = await inspectingStructuredEndpoint((value) => { requestBody = value; });
+    const provider = new OpenAiCompatibleProvider({ providerId: 'deepseek', baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
+    await provider.collectStructured([{ role: 'user', content: 'Return JSON.' }], undefined, { maxTokens: 1200, thinking: 'disabled' });
+    expect(requestBody).toMatchObject({ thinking: { type: 'disabled' } });
+  });
+
+  it('preserves provider usage when the compatible endpoint returns it', async () => {
+    const baseUrl = await inspectingStructuredEndpoint(() => undefined, {
+      choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 17, completion_tokens: 9, prompt_tokens_details: { cached_tokens: 4 } },
+    });
+    const provider = new OpenAiCompatibleProvider({ baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
+    await expect(provider.collectStructured([{ role: 'user', content: 'Return JSON.' }])).resolves.toEqual({
+      content: '{"ok":true}',
+      finishReason: 'stop',
+      usage: { inputTokens: 17, outputTokens: 9, cachedInputTokens: 4 },
+    });
+  });
+
+  it('preserves safe reasoning/refusal metadata without returning their content as output', async () => {
+    const baseUrl = await inspectingStructuredEndpoint(() => undefined, {
+      choices: [{ message: { content: '', reasoning_content: 'internal reasoning' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 31, completion_tokens: 1200 },
+    });
+    const provider = new OpenAiCompatibleProvider({ providerId: 'deepseek', baseUrl, model: 'deepseek-v4-flash', apiKey: 'x' });
+    await expect(provider.collectStructured([{ role: 'user', content: 'Return JSON.' }], undefined, { maxTokens: 1200 })).resolves.toMatchObject({
+      content: '', finishReason: 'length', metadata: { providerId: 'deepseek', model: 'deepseek-v4-flash', reasoningPresent: true, refusalPresent: false },
+    });
   });
 });

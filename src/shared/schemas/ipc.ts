@@ -44,6 +44,8 @@ export type SaveProfileInput = z.infer<typeof SaveProfileInputSchema>;
 
 export const GenerateDailyReviewInputSchema = z.object({
   date: IsoDate,
+  /** 新调用必须绑定具体日志；旧日期调用仅在当天唯一日志时兼容。 */
+  journalId: StableJournalId.optional(),
   regenerate: z.boolean().optional(),
 }).strict();
 const PeriodicReviewBaseSchema = z.object({

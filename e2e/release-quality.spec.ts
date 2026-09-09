@@ -113,9 +113,12 @@ test('settings information architecture and journal template flow are usable in 
     await expect(page.getByRole('button', { name: '创建备份' })).toBeVisible();
     await expect(page.getByRole('button', { name: '从备份恢复' })).toBeVisible();
     await expect(page.getByText(/发布地址|保存地址|检查更新/)).toHaveCount(0);
-    await expect(page.getByText('版本 2.6.5')).toBeVisible();
+    await expect(page.getByText('版本 2.6.15')).toBeVisible();
 
     await page.getByRole('button', { name: '日志', exact: true }).click();
+    const previousDate = await page.evaluate(() => { const date = new Date(); date.setDate(date.getDate() - 1); return date.toISOString().slice(0, 10); });
+    await page.locator('.date-control summary').click();
+    await page.getByLabel('日志日期').fill(previousDate);
     await page.getByRole('button', { name: '管理模板' }).click();
     await page.getByRole('button', { name: '新建模板' }).click();
     await page.getByRole('textbox', { name: '模板名称' }).fill('E2E 模板');
@@ -125,8 +128,6 @@ test('settings information architecture and journal template flow are usable in 
     await page.getByRole('button', { name: '关闭' }).click();
     await page.getByLabel('选择模板').selectOption('E2E 模板');
     await expect(page.getByRole('textbox', { name: '日志内容' })).toHaveValue('事实：');
-    const previousDate = await page.evaluate(() => { const date = new Date(); date.setDate(date.getDate() - 1); return date.toISOString().slice(0, 10); });
-    await page.getByLabel('日志日期').fill(previousDate);
     await page.getByRole('textbox', { name: '日志内容' }).fill('脱敏核心冒烟日志：完成设置与安装验证。');
     await page.getByRole('button', { name: '保存日志' }).click();
     await expect(page.getByText('已保存到本机')).toBeVisible();
@@ -152,6 +153,64 @@ test('dark theme keeps shared selects as one non-repeating arrow', async () => {
   }
 });
 
+test('history keeps long records inside the available columns at wide and compact sizes', async () => {
+  test.skip(Boolean(process.env.ZHIJI_E2E_EXECUTABLE), '窗口尺寸边界在 packaged-asar 模式中验证。');
+  const running = await launchClean();
+  try {
+    if (!running.app) return;
+    const { page } = running;
+    await page.evaluate(async () => {
+      const body = `超长中文标题用于验证历史记录列表与正文之间的最小宽度链。${'连续英文标题 without spaces '.repeat(8)}https://example.com/a/very/long/path/that/should/wrap\n\n${'隔离正文用于验证阅读器可读性和自身滚动，不调用 AI。'.repeat(100)}`;
+      await window.zhiji.journals.create({ date: '2026-09-08', body, projectIds: [] });
+      await window.zhiji.journals.create({ date: '2026-09-07', body: `${body}\n第二条隔离记录`, projectIds: [] });
+    });
+    await page.reload();
+    await page.getByRole('button', { name: '日志', exact: true }).click();
+    await page.getByRole('button', { name: '过去日志' }).click();
+    await expect(page.locator('.history-layout')).toBeVisible();
+
+    const measure = () => page.evaluate(() => {
+      const layout = document.querySelector('.history-layout') as HTMLElement;
+      const list = document.querySelector('.history-list') as HTMLElement;
+      const reader = document.querySelector('.history-reader') as HTMLElement;
+      const pageView = document.querySelector('.page-view') as HTMLElement;
+      const layoutBox = layout.getBoundingClientRect();
+      const listBox = list.getBoundingClientRect();
+      const readerBox = reader.getBoundingClientRect();
+      return {
+        columns: getComputedStyle(layout).gridTemplateColumns.trim().split(/\s+/).length,
+        listRight: listBox.right,
+        readerLeft: readerBox.left,
+        listBottom: listBox.bottom,
+        readerTop: readerBox.top,
+        layoutWidth: layoutBox.width,
+        pageWidth: pageView.clientWidth,
+        pageScrollWidth: pageView.scrollWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        documentClientWidth: document.documentElement.clientWidth,
+      };
+    });
+
+    await running.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800));
+    await page.waitForTimeout(250);
+    const wide = await measure();
+    expect(wide.columns).toBe(2);
+    expect(wide.readerLeft).toBeGreaterThanOrEqual(wide.listRight - 1);
+    expect(wide.pageScrollWidth).toBeLessThanOrEqual(wide.pageWidth + 1);
+    expect(wide.documentWidth).toBeLessThanOrEqual(wide.documentClientWidth + 1);
+
+    await running.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(900, 640));
+    await page.waitForTimeout(250);
+    const compact = await measure();
+    expect(compact.columns).toBe(1);
+    expect(compact.readerTop).toBeGreaterThanOrEqual(compact.listBottom - 1);
+    expect(compact.pageScrollWidth).toBeLessThanOrEqual(compact.pageWidth + 1);
+    expect(compact.documentWidth).toBeLessThanOrEqual(compact.documentClientWidth + 1);
+  } finally {
+    await closeClean(running);
+  }
+});
+
 test('workspace scrolls while the sidebar keeps its viewport boundary', async () => {
   const running = await launchClean();
   try {
@@ -161,7 +220,7 @@ test('workspace scrolls while the sidebar keeps its viewport boundary', async ()
       for (let index = 0; index < 32; index += 1) await api.journals.create({ date: '2026-08-22', body: `脱敏打包验收日志 ${index}`, projectIds: [] });
     });
     await page.reload();
-    await expect(page.getByRole('heading', { name: '开始', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '开始', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '日志', exact: true }).click();
     await page.getByRole('button', { name: '过去日志' }).click();
     await expect(page.locator('.history-list')).toBeVisible();
@@ -197,7 +256,7 @@ test('packaged daily feedback exposes safe recovery without leaking failed outpu
       await running.app.evaluate(({ ipcMain }) => {
         ipcMain.removeHandler('reviews:generate-daily');
         let attempts = 0;
-        ipcMain.handle('reviews:generate-daily', async () => { attempts += 1; return attempts === 1 ? { kind: 'error', message: 'AI 这次没有返回可用的反馈，日志和已有数据没有受到影响。', diagnostics: { kind: 'invalid_json', finishReason: 'stop', outputLength: 21, schemaPaths: [], at: new Date().toISOString() } } : { kind: 'review', review: { body: '脱敏反馈已恢复' } }; });
+        ipcMain.handle('reviews:generate-daily', async () => { attempts += 1; return attempts === 1 ? { kind: 'error', message: 'AI 这次没有返回可用的反馈，日志和已有数据没有受到影响。', diagnostics: { kind: 'invalid_json', finishReason: 'stop', outputLength: 21, schemaPaths: [], at: new Date().toISOString() } } : { kind: 'review', review: { schemaVersion: 2, id: 'review_e2erecovery', type: 'daily', periodStart: new Date().toISOString().slice(0, 10), periodEnd: new Date().toISOString().slice(0, 10), sourceIds: ['journal_e2erecovery'], sourceVersions: [], projectId: null, provider: 'openai-compatible', model: 'fake', promptVersion: 'daily-review-v1', createdAt: new Date().toISOString(), body: '脱敏反馈已恢复' } }; });
       });
     }
     await page.getByRole('button', { name: '日志', exact: true }).click();
@@ -217,15 +276,36 @@ test('packaged daily feedback exposes safe recovery without leaking failed outpu
   }
 });
 
+test('packaged Agent lifecycle stops strictly and keeps list read-only while restart is required', async () => {
+  test.skip(Boolean(process.env.ZHIJI_E2E_EXECUTABLE), '需要 ElectronApplication 才能运行隔离 packaged-asar 生命周期冒烟。');
+  const running = await launchClean();
+  const target = await mkdtemp(path.join(os.tmpdir(), 'zhiji-maintenance-target-'));
+  try {
+    const { page } = running;
+    const session = await page.evaluate(() => window.zhiji.agent.start({ title: '维护生命周期冒烟' }));
+    const before = await page.evaluate(() => window.zhiji.agent.list());
+    expect(before).toEqual(expect.arrayContaining([expect.objectContaining({ id: session.id, title: '维护生命周期冒烟' })]));
+
+    const changed = await page.evaluate((targetPath) => window.zhiji.dataDirectory.changeLocation({ target: targetPath, move: false }), target);
+    expect(changed.moved).toBe(false);
+    const after = await page.evaluate(() => window.zhiji.agent.list());
+    expect(after).toEqual(expect.arrayContaining([expect.objectContaining({ id: session.id })]));
+    await expect(page.evaluate(() => window.zhiji.agent.start({ title: '不应在等待重启期间启动' }))).rejects.toThrow(/维护|重启|只读/);
+  } finally {
+    await closeClean(running);
+    await rm(target, { recursive: true, force: true });
+  }
+});
+
 test('installed executable starts Agent and creates a session', async () => {
   test.skip(!process.env.ZHIJI_E2E_EXECUTABLE, '仅在 ZHIJI_E2E_EXECUTABLE 安装版验收中运行。');
   const running = await launchClean();
   try {
     const { page } = running;
     await page.getByRole('button', { name: '知己 Agent', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '知己 Agent', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '知己 Agent' })).toBeVisible();
     await page.getByRole('button', { name: '新建会话' }).click();
-    await expect(page.getByText('新对话').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: '新对话', level: 3 })).toBeVisible();
   } finally {
     await closeClean(running);
   }

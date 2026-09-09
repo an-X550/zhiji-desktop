@@ -30,6 +30,17 @@ export interface StructuredOutputDiagnostics {
   outputLength: number;
   schemaPaths: string[];
   at: string;
+  /** 仅记录安全的请求/响应元数据，不包含提示词、日志或模型原文。 */
+  maxTokens?: number;
+  attempt?: number;
+  retryOf?: StructuredOutputFailureKind;
+  providerId?: string;
+  model?: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  reasoningPresent?: boolean;
+  refusalPresent?: boolean;
 }
 
 export function isStructuredOutputError(error: unknown): error is Error & { code: 'INVALID_MODEL_OUTPUT'; diagnostics: StructuredOutputDiagnostics } {

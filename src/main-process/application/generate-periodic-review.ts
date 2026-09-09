@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { appError } from '../../shared/errors/app-error';
+import { appError, isStructuredOutputError } from '../../shared/errors/app-error';
 import type { Journal, PeriodicGenerationResult, Review, ReviewPreview } from '../../shared/schemas/domain';
 import type { MaterialSelection } from '../domain/material-selector';
 import { selectMaterials } from '../domain/material-selector';
@@ -29,7 +29,6 @@ export class GeneratePeriodicReview {
     if (!preview) throw appError({ code: 'INVALID_INPUT', message: '请先预览并确认材料。' });
     const materials = await this.materials(input);
     if (PreviewTokenStore.digest(materials) !== preview.digest) throw appError({ code: 'INVALID_INPUT', message: '材料已变化，请重新预览。' });
-    this.previews.consume(input.previewToken);
     const task = this.tasks.start();
     const abortExternal = () => task.controller.abort();
     if (externalSignal?.aborted) task.controller.abort();
@@ -42,18 +41,24 @@ export class GeneratePeriodicReview {
       const runtime = await runPeriodicFeedback({
         type: input.type as 'weekly' | 'monthly' | 'project', start: input.start, end: input.end,
         journals: journalMaterials, reviews: reviewMaterials, provider: this.provider, signal: task.controller.signal,
+        onStructuredRetry: () => this.tasks.transition(task.taskId, 'retrying_format'),
         ...(profile?.enabledForAi ? { profile: profile.body } : {}),
       });
       if (runtime.kind === 'clarification') {
+        this.previews.consume(input.previewToken);
         this.tasks.transition(task.taskId, 'completed');
         return { kind: 'clarification', question: runtime.question };
       }
       this.tasks.transition(task.taskId, 'validating');
       const createdAt = this.now();
       const review: Review = { schemaVersion: 1, id: `review_${crypto.randomUUID().replace(/-/g, '')}`, type: input.type, periodStart: input.start, periodEnd: input.end, sourceIds: materials.map((x) => x.id), projectId: input.projectId ?? null, provider: 'openai-compatible', model: input.model, promptVersion: PERIODIC_REVIEW_PROMPT_VERSION, createdAt, body: runtime.body };
-      this.tasks.transition(task.taskId, 'saving'); await this.reviews.save(review); this.tasks.transition(task.taskId, 'completed');
+      this.tasks.transition(task.taskId, 'saving'); await this.reviews.save(review); this.previews.consume(input.previewToken); this.tasks.transition(task.taskId, 'completed');
       return { kind: 'review', review };
-    } catch (error) { this.tasks.transition(task.taskId, task.controller.signal.aborted || externalSignal?.aborted ? 'cancelled' : 'failed'); throw error; }
+    } catch (error) {
+      this.tasks.transition(task.taskId, task.controller.signal.aborted || externalSignal?.aborted ? 'cancelled' : 'failed');
+      if (isStructuredOutputError(error)) return { kind: 'error', message: error.message, diagnostics: error.diagnostics };
+      throw error;
+    }
     finally { externalSignal?.removeEventListener('abort', abortExternal); }
   }
 }

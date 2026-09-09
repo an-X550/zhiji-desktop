@@ -1,0 +1,33 @@
+{
+  "historyLight1440": {
+    "scrollHeight": 3621,
+    "clientHeight": 852,
+    "listRows": 48
+  },
+  "historyLight960": {
+    "bodyWidth": 960,
+    "viewportWidth": 960,
+    "overflowX": false
+  },
+  "modalFocusInside": true,
+  "modalClosedWithEscape": true,
+  "modalRestoredFocus": true,
+  "agentComposer960": {
+    "top": 518.7000122070312,
+    "bottom": 622.7000122070312,
+    "height": 104,
+    "viewportHeight": 640
+  },
+  "agentZoom125": {
+    "innerWidth": 1152,
+    "innerHeight": 720,
+    "scrollWidth": 1152,
+    "clientWidth": 1152
+  },
+  "agentZoom150": {
+    "innerWidth": 960,
+    "innerHeight": 600,
+    "scrollWidth": 950,
+    "clientWidth": 950
+  }
+}

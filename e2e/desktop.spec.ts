@@ -15,9 +15,9 @@ test('a non-CLI user completes the local journal loop', async () => {
     const page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: '写下今天的经历' })).toBeVisible();
     await page.getByRole('button', { name: '知己 Agent', exact: true }).click();
-    await expect(page.getByRole('heading', { name: '知己 Agent', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '知己 Agent' })).toBeVisible();
     await page.getByRole('button', { name: '新建会话' }).click();
-    await expect(page.getByText('新对话').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: '新对话', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '项目', exact: true }).click();
     await page.getByRole('button', { name: '新建第一个项目' }).click();
     await page.getByRole('textbox', { name: '项目名称' }).fill('桌面端验收');
@@ -27,10 +27,11 @@ test('a non-CLI user completes the local journal loop', async () => {
     await page.getByRole('button', { name: '开始', exact: true }).click();
     await page.getByRole('button', { name: '开始记录' }).click();
     await page.getByLabel('关联项目（可选）').selectOption({ label: '桌面端验收' });
-    await page.getByRole('textbox', { name: '日志内容' }).fill('这是一条由桌面端自动化验收写入的本地日志。');
-    await page.getByRole('button', { name: '保存日志' }).click();
-    await expect(page.getByText('已保存到本机')).toBeVisible();
-    await page.getByRole('textbox', { name: '日志内容' }).fill('这是同一天的第二条日志，不应覆盖第一条。');
+      await page.getByRole('textbox', { name: '日志内容' }).fill('这是一条由桌面端自动化验收写入的本地日志。');
+      await page.getByRole('button', { name: '保存日志' }).click();
+      await expect(page.getByText('已保存到本机')).toBeVisible();
+      await page.getByRole('button', { name: '新建日志' }).click();
+      await page.getByRole('textbox', { name: '日志内容' }).fill('这是同一天的第二条日志，不应覆盖第一条。');
     await page.getByRole('button', { name: '保存日志' }).click();
 
     await page.getByRole('button', { name: '开始', exact: true }).click();

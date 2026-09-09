@@ -5,6 +5,7 @@ import { appError } from '../../shared/errors/app-error';
 import { atomicWriteUtf8 } from '../infrastructure/markdown/atomic-write';
 import { normalizeProviderConfig, PROVIDER_PRESETS, ProviderConfigSchema, type ProviderConfig, type PublicProviderConfig } from '../infrastructure/ai/provider-config';
 import { OpenAiCompatibleProvider } from '../infrastructure/ai/openai-compatible-provider';
+import type { AiConnectionTestResult } from '../../shared/schemas/domain';
 import type { AgentStreamDelta, AgentToolSpec, ChatMessage, CollectOptions, StructuredCollectOptions, StructuredCompletion } from '../infrastructure/ai/openai-compatible-provider';
 import type { CredentialStore } from '../infrastructure/credentials/credential-store';
 
@@ -41,12 +42,12 @@ export class ConfigureAi {
     return { ...config, hasApiKey: Boolean(await this.credentials.read(config.providerId)) };
   }
 
-  async testConnection(input: SaveProviderConfigInput): Promise<void> {
+  async testConnection(input: SaveProviderConfigInput): Promise<AiConnectionTestResult> {
     const { apiKey, ...rawConfig } = input;
     const config = normalizeProviderConfig(rawConfig, this.allowLoopbackHttp);
     const key = apiKey || await this.credentials.read(config.providerId);
     if (!key) throw appError({ code: 'INVALID_INPUT', message: '请先填写 API Key。' });
-    await new OpenAiCompatibleProvider({ ...config, apiKey: key }).testConnection();
+    return new OpenAiCompatibleProvider({ ...config, apiKey: key }).testConnection();
   }
 
   async clearApiKey(): Promise<PublicProviderConfig> {

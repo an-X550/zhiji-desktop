@@ -1,7 +1,8 @@
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
 import { z } from 'zod';
+import { atomicWriteUtf8 } from '../markdown/atomic-write';
 
 const ConfigSchema = z.object({
   schemaVersion: z.literal(1),
@@ -35,9 +36,8 @@ export class DataRootConfig {
   }
 
   async save(config: ZhijiConfig): Promise<void> {
-    await mkdir(path.dirname(this.target), { recursive: true });
     const validated = ConfigSchema.parse(config);
-    await writeFile(this.target, `${JSON.stringify(validated, null, 2)}\n`, 'utf8');
+    await atomicWriteUtf8(this.target, `${JSON.stringify(validated, null, 2)}\n`, (value) => ConfigSchema.parse(JSON.parse(value)));
   }
 
   /** 仅更新部分字段；值为 undefined 时删除该字段。 */

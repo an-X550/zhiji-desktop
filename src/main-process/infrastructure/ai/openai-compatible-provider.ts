@@ -1,12 +1,20 @@
 import { appError } from '../../../shared/errors/app-error';
+import type { AiConnectionTestResult, AiUsage } from '../../../shared/schemas/domain';
 
 export type ChatMessage =
   | { role: 'system' | 'user'; content: string }
   | { role: 'assistant'; content: string; reasoning?: string; toolCalls?: Array<{ id: string; name: string; arguments: string }> }
   | { role: 'tool'; content: string; toolCallId: string };
-export interface CollectOptions { jsonObject?: boolean }
-export interface StructuredCompletion { content: string; finishReason: string | null }
-export interface StructuredCollectOptions { maxTokens: number }
+export interface CollectOptions { jsonObject?: boolean; maxTokens?: number }
+export type ProviderUsage = AiUsage;
+export interface StructuredCompletionMetadata {
+  providerId?: string;
+  model?: string;
+  reasoningPresent?: boolean;
+  refusalPresent?: boolean;
+}
+export interface StructuredCompletion { content: string; finishReason: string | null; usage?: ProviderUsage | null; metadata?: StructuredCompletionMetadata }
+export interface StructuredCollectOptions { maxTokens: number; thinking?: 'disabled' | 'enabled' }
 export interface AgentToolSpec { name: string; description: string; parameters: Record<string, unknown> }
 export type AgentStreamDelta = { kind: 'text'; text: string } | { kind: 'reasoning'; text: string } | { kind: 'tool-call'; index: number; callId: string; name?: string; argumentsDelta: string };
 
@@ -74,7 +82,7 @@ export class OpenAiCompatibleProvider {
           ? { role: 'tool', content: message.content, tool_call_id: message.toolCallId }
           : message.role === 'assistant' && message.toolCalls?.length
             ? { role: 'assistant', content: message.content, ...(message.reasoning ? { reasoning_content: message.reasoning } : {}), tool_calls: message.toolCalls.map((call) => ({ id: call.id, type: 'function', function: { name: internalToolNames.get(call.name) ?? call.name, arguments: call.arguments } })) }
-            : { role: message.role, content: message.content }), stream: true, ...(deepSeek ? { thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } } : {}), ...(options?.jsonObject ? { response_format: { type: 'json_object' } } : {}), ...(apiTools?.length ? { tools: apiTools.map((tool) => ({ type: 'function', function: tool })) } : {}) }),
+            : { role: message.role, content: message.content }), stream: true, ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}), ...(deepSeek ? { thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } } : {}), ...(options?.jsonObject ? { response_format: { type: 'json_object' } } : {}), ...(apiTools?.length ? { tools: apiTools.map((tool) => ({ type: 'function', function: tool })) } : {}) }),
       });
     } catch {
       throw mapNetworkError(signal);
@@ -148,6 +156,7 @@ export class OpenAiCompatibleProvider {
           messages: messages.map((message) => ({ role: message.role, content: message.content })),
           stream: false,
           max_tokens: options.maxTokens,
+          ...(this.config.providerId === 'deepseek' && options.thinking ? { thinking: { type: options.thinking } } : {}),
           response_format: { type: 'json_object' },
         }),
       });
@@ -158,26 +167,102 @@ export class OpenAiCompatibleProvider {
     let payload: unknown;
     try { payload = await response.json(); }
     catch { throw appError({ code: 'UNKNOWN', message: '接口返回内容无法读取。' }); }
-    const choice = (payload as { choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }> } | null)?.choices?.[0];
-    const content = typeof choice?.message?.content === 'string' ? choice.message.content : '';
+    const choice = (payload as { choices?: Array<{ message?: { content?: unknown; reasoning_content?: unknown; refusal?: unknown }; finish_reason?: unknown }>; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } } } | null)?.choices?.[0];
+    const message = choice?.message;
+    const content = typeof message?.content === 'string' ? message.content : '';
     const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
-    return { content, finishReason };
+    const reasoningPresent = typeof message?.reasoning_content === 'string' ? message.reasoning_content.length > 0 : Boolean(message?.reasoning_content);
+    const refusalPresent = typeof message?.refusal === 'string' ? message.refusal.length > 0 : Boolean(message?.refusal);
+    const usage = (payload as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } } } | null)?.usage;
+    const metadata = this.config.providerId
+      ? { providerId: this.config.providerId, model: this.config.model, reasoningPresent, refusalPresent }
+      : reasoningPresent || refusalPresent ? { reasoningPresent, refusalPresent } : undefined;
+    return {
+      content,
+      finishReason,
+      ...(usage ? {
+        usage: {
+          inputTokens: typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : null,
+          outputTokens: typeof usage.completion_tokens === 'number' ? usage.completion_tokens : null,
+          cachedInputTokens: typeof usage.prompt_tokens_details?.cached_tokens === 'number' ? usage.prompt_tokens_details.cached_tokens : null,
+        },
+      } : {}),
+      ...(metadata ? { metadata } : {}),
+    };
   }
 
-  async testConnection(signal?: AbortSignal): Promise<void> {
+  async testConnection(signal?: AbortSignal): Promise<AiConnectionTestResult> {
     const combined = signal
       ? AbortSignal.any([signal, AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS)])
       : AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS);
+    const maxTokens = 32;
     let response: Response;
     try {
       response = await fetch(`${this.config.baseUrl}/chat/completions`, {
         method: 'POST', signal: combined,
         headers: { authorization: `Bearer ${this.config.apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: this.config.model, messages: [{ role: 'user', content: 'Reply with OK.' }], stream: false, max_tokens: 1 }),
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [{ role: 'user', content: 'Return exactly one JSON object: {"ok":true}. Do not include Markdown or any extra text.' }],
+          stream: false,
+          max_tokens: maxTokens,
+          ...(this.config.providerId === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
+          response_format: { type: 'json_object' },
+        }),
       });
     } catch {
       throw mapNetworkError(signal);
     }
     ensureSuccessfulResponse(response, this.config.model);
+    let payload: unknown;
+    try { payload = await response.json(); }
+    catch { throw appError({ code: 'UNKNOWN', message: '连接已建立，但接口返回内容无法读取。' }); }
+    const choice = (payload as { choices?: Array<{ message?: { content?: unknown; reasoning_content?: unknown; refusal?: unknown }; finish_reason?: unknown }>; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } } } | null)?.choices?.[0];
+    const message = choice?.message;
+    const content = typeof message?.content === 'string' ? message.content : '';
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
+    const reasoningPresent = typeof message?.reasoning_content === 'string' ? message.reasoning_content.length > 0 : Boolean(message?.reasoning_content);
+    const refusalPresent = typeof message?.refusal === 'string' ? message.refusal.length > 0 : Boolean(message?.refusal);
+    const rawUsage = (payload as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; prompt_tokens_details?: { cached_tokens?: unknown } } } | null)?.usage;
+    const usage: ProviderUsage | null = rawUsage ? {
+      inputTokens: typeof rawUsage.prompt_tokens === 'number' ? rawUsage.prompt_tokens : null,
+      outputTokens: typeof rawUsage.completion_tokens === 'number' ? rawUsage.completion_tokens : null,
+      cachedInputTokens: typeof rawUsage.prompt_tokens_details?.cached_tokens === 'number' ? rawUsage.prompt_tokens_details.cached_tokens : null,
+    } : null;
+    const metadata = { providerId: this.config.providerId ?? 'unknown', model: this.config.model, reasoningPresent, refusalPresent };
+    const failure = (kind: 'empty_content' | 'truncated' | 'invalid_json' | 'schema_mismatch', schemaPaths: string[] = []) => appError({
+      code: 'INVALID_MODEL_OUTPUT',
+      message: '连接已建立，但结构化响应未通过校验。',
+      diagnostics: {
+        kind,
+        finishReason,
+        outputLength: content.length,
+        schemaPaths,
+        at: new Date().toISOString(),
+        maxTokens,
+        attempt: 1,
+        providerId: metadata.providerId,
+        model: metadata.model,
+        ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedInputTokens } : {}),
+        reasoningPresent,
+        refusalPresent,
+      },
+    });
+    if (finishReason === 'length' || finishReason === 'max_tokens') throw failure('truncated');
+    if (!content.trim()) throw failure('empty_content');
+    let parsed: unknown;
+    try { parsed = JSON.parse(content); }
+    catch { throw failure('invalid_json'); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || (parsed as { ok?: unknown }).ok !== true) throw failure('schema_mismatch', ['ok']);
+    return {
+      providerId: metadata.providerId,
+      model: metadata.model,
+      finishReason,
+      outputLength: content.length,
+      jsonValid: true,
+      usage,
+      reasoningPresent,
+      refusalPresent,
+    };
   }
 }

@@ -1,6 +1,6 @@
 # 知己桌面端：安装 · 打包 · 分发指南
 
-> 适用版本：当前源码与 v2.6.5 发布包。本文回答三个问题：怎么装、怎么打包、怎么发给别人；并附当前产品的文件职责清单。
+> 适用版本：当前源码与本次发布均为 v2.6.15。本文回答三个问题：怎么装、怎么打包、怎么发给别人；并附当前产品的文件职责清单。
 
 ---
 
@@ -10,8 +10,8 @@
 
 | 形态 | 路径 | 说明 |
 | --- | --- | --- |
-| **安装版**（推荐分发） | `out/release-candidate/v2.6.5/Zhiji-Setup-v2.6.5.exe` | Windows 安装程序，双击下一步即装好，会建开始菜单/桌面快捷方式 |
-| **免安装版**（直接运行） | `out/知己-win32-x64/知己.exe` | 解压即用，双击 `知己.exe` 直接运行，无需安装 |
+| **v2.6.15 安装版** | `out/release-candidate/v2.6.15/Zhiji-Setup-v2.6.15.exe` | 本次 Squirrel 发布包，三件套来自同一次 `npm run make` |
+| **v2.6.15 packaged-asar** | `out/知己-win32-x64/知己.exe` | 本地免安装版，已通过打包 E2E |
 
 ### 安装版流程（Setup.exe）
 
@@ -25,6 +25,8 @@
 2. 双击其中的 `知己.exe` 运行。数据同样默认落在 `文档\知己`。
 
 > 两种形态共用同一份本地数据（默认 `文档\知己`），切换形态不会丢数据。
+
+本次 v2.6.15 已生成并验证 packaged-asar 与 Squirrel 三件套；仍不要把未实际安装的免安装目录称作已安装版本。
 
 ---
 
@@ -87,36 +89,40 @@ unzip -oq "$LOCALAPPDATA/electron/Cache/<hash>/electron-v<版本>-win32-x64.zip"
 
 `npm run make` 首次会下载 Squirrel 打包工具，可能耗时数十分钟；`out/make/squirrel.windows/x64/` 出现文件不等于成功，必须同时确认命令退出 0、安装器元数据正确且三件套内部版本一致。之后再打包会快很多（工具已缓存）。
 
-> ⚠️ **rcedit 或任何非零 `make` 都是失败**：即使 `out/make` 已出现 `Setup.exe`、`.nupkg` 或 `RELEASES`，也不得从失败运行的目录复制或分发任何文件。应从纯 ASCII 路径（推荐已核对目标的 junction）重新执行，直到退出码为 0，并确认安装器元数据正确、`RELEASES` 指向同版本 `.nupkg`、三件套文件版本一致。
+> ⚠️ **rcedit 或任何非零 `make` 都是失败**：即使 `out/make` 已出现 `Setup.exe`、`.nupkg` 或 `RELEASES`，也不得从失败运行的目录复制或分发任何文件。应从纯 ASCII 物理路径重新执行，直到退出码为 0，并确认安装器元数据正确、`RELEASES` 指向同版本 `.nupkg`、三件套文件版本一致。
 
-需要绕过中文路径时，可用下面的安全 PowerShell 流程。它只在 junction 不存在时创建，且只删除本次创建并确认目标正确的 junction：
+需要绕过中文路径时，可用下面的安全 PowerShell 流程。当前 Forge/electron-packager 在 junction 下可能把路径解析为 symlink 并在打包阶段报 `EPERM`，因此这里使用 ASCII 物理副本；不要把 junction 当作当前版本的成功依据。脚本只在目标不存在时创建副本，并且只删除本次创建、已核对的临时副本：
 
 ```powershell
-$desktopPath = (Get-Location).Path
-$workspacePath = [IO.Path]::GetFullPath((Join-Path $desktopPath '..\..'))
-$junctionPath = 'C:\zhiji-build'
-$createdJunction = $false
-
-$existing = Get-Item -LiteralPath $junctionPath -Force -ErrorAction SilentlyContinue
-if ($existing) {
-  $existingTarget = [IO.Path]::GetFullPath([string]$existing.Target)
-  if (-not $existing.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint) -or $existingTarget -ne $workspacePath) {
-    throw "已有 C:\zhiji-build，但它不是指向当前工作区的 junction。"
-  }
-} else {
-  New-Item -ItemType Junction -Path $junctionPath -Target $workspacePath | Out-Null
-  $createdJunction = $true
+$desktopPath = (Resolve-Path '.').Path
+if (-not (Test-Path -LiteralPath (Join-Path $desktopPath 'package.json'))) {
+  throw '请在 apps/zhiji-desktop 目录执行此流程。'
 }
+$asciiPath = 'C:\zhiji-build'
+$createdCopy = $false
 
-Push-Location $junctionPath
+if (Test-Path -LiteralPath $asciiPath) {
+  throw "已有 $asciiPath；为避免覆盖未知内容，请先人工核对并移走它。"
+}
+New-Item -ItemType Directory -Path $asciiPath | Out-Null
+$createdCopy = $true
 try {
-  npm run make
-  if ($LASTEXITCODE -ne 0) { throw "make failed with exit code $LASTEXITCODE" }
+  robocopy $desktopPath $asciiPath /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /MT:16 /XD (Join-Path $desktopPath 'out') (Join-Path $desktopPath 'test-results') | Out-Host
+  if ($LASTEXITCODE -gt 7) { throw "复制桌面端到 ASCII 临时目录失败，robocopy=$LASTEXITCODE" }
+
+  Push-Location $asciiPath
+  try {
+    npm run make
+    if ($LASTEXITCODE -ne 0) { throw "make failed with exit code $LASTEXITCODE" }
+  } finally {
+    Pop-Location
+  }
 } finally {
-  Pop-Location
-  if ($createdJunction) { Remove-Item -LiteralPath $junctionPath -Force }
+  if ($createdCopy -and (Test-Path -LiteralPath $asciiPath)) { Remove-Item -LiteralPath $asciiPath -Recurse -Force }
 }
 ```
+
+`/XD` 使用源目录的完整路径，只排除桌面端自己的旧 `out` 与 `test-results`；不要写成单独的 `out`，否则会误排除依赖包内部的 `out` 目录。
 
 ---
 
@@ -127,7 +133,7 @@ try {
 **给普通用户安装 → 只需发一个文件：**
 
 ```
-out/release-candidate/v2.6.5/Zhiji-Setup-v2.6.5.exe
+out/release-candidate/v2.6.6/Zhiji-Setup-v2.6.6.exe
 ```
 
 **一次发布的安装包由这三个 Squirrel 文件组成；对普通用户直接提供安装器即可：**
@@ -147,7 +153,7 @@ Setup.exe                # 引导安装器
 ### 当前限制（诚实边界）
 
 - **未代码签名**：Windows SmartScreen 可能提示「未知发布者」，需点「仍要运行」。正式对外分发前建议购买代码签名证书。
-- 未做自动更新、未验证 Windows 10 干净虚拟机、未做升级/卸载的完整回归；v2.6.5 只承诺用隔离临时数据根完成核心安装冒烟。
+- 未做自动更新、未验证 Windows 10 干净虚拟机、未做升级/卸载的完整回归；v2.6.8 目前只承诺用隔离临时数据根完成 packaged-asar 核心冒烟，v2.6.6 RC 仍是上一轮 Squirrel 证据。
 - 数据目录与用户数据（API Key）是两处：换机器或重装需用「设置 → 数据与隐私 → 创建备份」迁移。
 
 ### 版本独立的本地 Release Candidate
@@ -155,13 +161,13 @@ Setup.exe                # 引导安装器
 每次准备分发时，先完成 `npm run package`、`npm run test:e2e`，再执行 `npm run make`。确认 `out/make/squirrel.windows/x64/` 是本次新生成的目录后，把本次三件套复制到版本独立目录：
 
 ```text
-out/release-candidate/v2.6.5/
-├─ Zhiji-Setup-v2.6.5.exe
-├─ zhiji-2.6.5-full.nupkg
+out/release-candidate/v2.6.15/
+├─ Zhiji-Setup-v2.6.15.exe
+├─ zhiji-2.6.15-full.nupkg
 └─ RELEASES
 ```
 
-只用该目录中的 `Zhiji-Setup-v2.6.5.exe` 做全新用户数据和核心功能验收；不要把旧 `out/make` 中的 `Setup.exe` 当成本次构建。旧 v2.6.3 RC 保留不覆盖。后续远程发布只能上传已经验收的同一份文件，且需要明确授权。
+只用该目录中的 `Zhiji-Setup-v2.6.15.exe` 做全新用户数据和核心功能验收；不要把旧 `out/make` 中的 `Setup.exe` 当成本次构建。旧版本 RC 保留不覆盖。远程发布只上传已经验收的同一份文件。
 
 ---
 
@@ -198,7 +204,7 @@ out/release-candidate/v2.6.5/
 | `main-process/application/` | 业务用例：保存日志、生成各类复盘、验证模式、AI 配置 |
 | `main-process/domain/` | 纯领域逻辑：任务状态机、材料选择、日反馈新鲜度等 |
 | `main-process/infrastructure/` | 落地实现：Markdown/JSON 仓储、AI 服务商、凭据、传输、数据目录、模板 |
-| `main-process/skill-runtime/` | Skill 行为的确定性复刻（LangGraph 编排 + 证据分级） |
+| `main-process/skill-runtime/` | Skill 行为的确定性复刻（显式 async 编排 + 证据分级 + 结构化输出校验） |
 | `main-process/prompts/` | 各链路的提示词 + 输出解析（版本化） |
 | `main-process/ipc/register-handlers.ts` | 所有渲染进程 ↔ 主进程的 IPC 通道注册 |
 | `shared/schemas/` | Zod 契约（domain 数据结构 + ipc 输入）与 `desktop-api` 类型 |

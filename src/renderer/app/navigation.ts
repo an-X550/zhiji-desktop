@@ -4,7 +4,8 @@ export type SettingsSection = 'general' | 'ai' | 'data';
 export type NavigationIntent =
   | { type: 'journal.compose' }
   | { type: 'journal.generate-daily' }
-  | { type: 'records.journals' }
+  | { type: 'records.journals'; id?: string }
+  | { type: 'records.reviews'; id?: string }
   | { type: 'review.weekly' }
   | { type: 'review.monthly'; month?: string }
   | { type: 'review.yearly'; year?: string }

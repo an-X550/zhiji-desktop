@@ -1,0 +1,12 @@
+[
+  {
+    "antipattern": "cramped-padding",
+    "name": "Cramped padding",
+    "description": "Text is too close to the edge of its container. Two shapes: (1) an element with its own text where the padding is too low for the font size, and (2) a wrapper with text-bearing children and near-zero padding against a visible boundary (border, outline, or non-transparent background) — children land flush against the boundary line. Add at least 8px (ideally 12–16px) of padding inside bordered, outlined, or colored containers.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\panda\\.claude\\skills\\知己\\apps\\zhiji-desktop\\docs\\visual-redesign\\journal-concept.html",
+    "line": 0,
+    "snippet": "<div> \"demo-bar\": children flush against border-bottom+bg on top/bottom (no inset)"
+  }
+]

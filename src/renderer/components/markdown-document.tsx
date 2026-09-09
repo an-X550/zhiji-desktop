@@ -7,5 +7,5 @@ function stripFrontmatter(source: string): string {
 
 /** Render model text as CommonMark/GFM without executing model-provided HTML. */
 export function MarkdownDocument({ children }: { children: string }) {
-  return <div className="markdown-document"><ReactMarkdown remarkPlugins={[remarkGfm]}>{stripFrontmatter(children)}</ReactMarkdown></div>;
+  return <div className="markdown-document"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: ({ children: tableChildren }) => <div className="markdown-table-wrap"><table>{tableChildren}</table></div> }}>{stripFrontmatter(children)}</ReactMarkdown></div>;
 }

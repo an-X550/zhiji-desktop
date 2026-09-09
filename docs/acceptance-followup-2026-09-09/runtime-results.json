@@ -1,0 +1,249 @@
+{
+  "results": {
+    "dailyInitial": {
+      "kind": "review",
+      "review": {
+        "id": "review_b3e6b32f7bf84c91a7795f6726449fc4",
+        "type": "daily",
+        "periodStart": "2026-09-09",
+        "periodEnd": "2026-09-09",
+        "sourceIds": [
+          "journal_25974ac0e85141fb8baa7ffc89f9e816"
+        ],
+        "projectId": null,
+        "provider": "openai-compatible",
+        "model": "deepseek-v4-flash",
+        "promptVersion": "daily-review-v3",
+        "createdAt": "2026-09-09T04:58:53.654Z",
+        "body": "📋 9月9日 日志反馈\n\n🔍 你没注意到的\n「先复现再修改有效」你将成功归因于方法有效，但未记录具体步骤，可能导致方法难以复制。\n\n⚡ 明天试试\n行动：写下今天复现问题的三步操作及验证条件。\n预测：明天日志将包含具体复现步骤，且补测试时能快速定位。\n\n💊 新认知：方法成功值得固化，具体步骤是复用的关键。 | 行动：写下今天复现问题的三步操作及验证条件。 | 验证：待明天",
+        "schemaVersion": 2,
+        "sourceVersions": [
+          {
+            "id": "journal_25974ac0e85141fb8baa7ffc89f9e816",
+            "updatedAt": "2026-09-09T04:58:50.273Z"
+          }
+        ]
+      }
+    },
+    "regenerateButton": {
+      "callsBefore": 1,
+      "callsAfter": 1
+    },
+    "dailyEdited": {
+      "kind": "review",
+      "review": {
+        "id": "review_b3e6b32f7bf84c91a7795f6726449fc4",
+        "type": "daily",
+        "periodStart": "2026-09-09",
+        "periodEnd": "2026-09-09",
+        "sourceIds": [
+          "journal_25974ac0e85141fb8baa7ffc89f9e816"
+        ],
+        "projectId": null,
+        "provider": "openai-compatible",
+        "model": "deepseek-v4-flash",
+        "promptVersion": "daily-review-v3",
+        "createdAt": "2026-09-09T04:58:56.400Z",
+        "body": "📋 9月9日 日志反馈\n\n🔍 你没注意到的\n「我觉得轻松，因为分段检查有效」你因分段检查而感到轻松，但未提及校对的具体方法或标准，可能依赖整体印象而非系统性检查，这可能导致遗漏。\n\n⚡ 明天试试\n行动：设定下轮校对前先列出检查清单（如错字、格式、链接），逐项打勾。\n预测：24小时内完成校对时，清楚说出基于清单的通过标准。\n\n💊 新认知：轻松感来自方法有效，但方法细节未明确，需结构化以提升可复制性。 | 行动：设定下轮校对前先列出检查清单（如错字、格式、链接），逐项打勾。 | 验证：待明天",
+        "schemaVersion": 2,
+        "sourceVersions": [
+          {
+            "id": "journal_25974ac0e85141fb8baa7ffc89f9e816",
+            "updatedAt": "2026-09-09T04:58:54.285Z"
+          }
+        ]
+      }
+    },
+    "weekly": {
+      "kind": "review",
+      "review": {
+        "schemaVersion": 1,
+        "id": "review_0d0cf3144da74b2ab6be740a6f8aff1d",
+        "type": "weekly",
+        "periodStart": "2026-09-07",
+        "periodEnd": "2026-09-09",
+        "sourceIds": [
+          "journal_25974ac0e85141fb8baa7ffc89f9e816",
+          "review_b3e6b32f7bf84c91a7795f6726449fc4"
+        ],
+        "projectId": null,
+        "provider": "openai-compatible",
+        "model": "deepseek-v4-flash",
+        "promptVersion": "periodic-review-v4",
+        "createdAt": "2026-09-09T04:59:03.183Z",
+        "body": "# 周报（2026-09-07 ~ 2026-09-09）\n\n## 聊天摘要\n\n本期仅覆盖9月9日一天。当日完成海桥项目文档校对，修正三处错字，因分段检查感到轻松，但校对方法缺乏系统清单。反馈建议下轮先列检查清单逐项核对。\n\n## 一、回顾目标\n\n未明确记录本周目标。从单日材料推断，当日目标是完成海桥项目文档校对。长期方向锚点在本材料中未出现，无法关联。\n\n## 二、评估结果\n\n当日校对任务完成，修正三处错字，达成当天目标。但校对标准与具体方法未记录，仅靠分段检查获得轻松感，缺少可验证的系统性。\n\n## 三、分析原因（正向）\n\n分段检查有效，带来轻松感，说明将任务拆段处理是可行做法，值得在后续校对中保留并放大。\n\n## 四、分析原因（负向）\n\n未设置明确的检查清单或通过标准，可能依赖整体印象导致遗漏。根因是方法未结构化，可复制性不足。\n\n## 五、重来演练\n\n保留分段检查的做法；调整为先列出检查清单（错字、格式、链接）再逐项打勾，使每次校对都有明确核对依据，减少遗漏风险。\n\n## 六、下周规划\n\n目标：下周期在校对任务中执行清单化检查，建立可复用的校对标准。\n\n手段：设定下轮校对前先列出检查清单（错字、格式、链接），逐项打勾。\n\n检查方式：24小时内完成校对时，能清楚说出基于清单的通过标准。\n\n## 方向锚点缺席检查\n\n本期材料未识别出方向锚点，缺席检查无法完成；这是需要确认的校准信号，请下周期补记录。\n\n## 质量自检\n\n证据等级 B：下游沉淀不足，结论已按降级规则限制为核心洞察，未断言未经材料支持的长期模式。\n方向锚点不足：本期材料未识别出方向锚点，缺席检查无法完成；请下周期补记录。\n质量门已通过；但存在已知缺口：仅1条日反馈、1条日志，不足以支持完整周复盘；缺少对比基线与长期方向锚点，未做方向缺席检查。"
+      }
+    },
+    "monthly": {
+      "kind": "review",
+      "review": {
+        "schemaVersion": 1,
+        "id": "review_11f6a476326a45dcb2cc83c2f664bd9c",
+        "type": "monthly",
+        "periodStart": "2026-09-01",
+        "periodEnd": "2026-09-09",
+        "sourceIds": [
+          "review_0d0cf3144da74b2ab6be740a6f8aff1d",
+          "journal_25974ac0e85141fb8baa7ffc89f9e816"
+        ],
+        "projectId": null,
+        "provider": "openai-compatible",
+        "model": "deepseek-v4-flash",
+        "promptVersion": "periodic-review-v4",
+        "createdAt": "2026-09-09T04:59:16.271Z",
+        "body": "# 月报（2026-09-01 ~ 2026-09-09）\n\n## 聊天摘要\n\n本期材料仅覆盖9月9日一天的海桥项目文档校对，修正三处错字，分段检查有效但缺乏清单化方法；长期方向锚点未出现。\n\n## 主主题\n\n本月材料未能归并出至少 2 个主主题，按证据不足如实记录；不硬凑。\n\n## 一、回顾目标\n\n未明确记录本期目标，仅从日志推断为完成海桥项目文档校对。长期方向锚点缺席，无法关联。\n\n## 二、评估结果\n\n校对任务完成，修正三处错字，达成当天目标；但校对标准未记录，系统性不足，达成度证据不全。\n\n## 三、分析原因（正向）\n\n分段检查是有效做法，带来轻松感，值得保留并放大。\n\n## 四、分析原因（负向）\n\n未设检查清单，依赖整体印象有遗漏风险，根因是方法未结构化。\n\n## 五、重来演练\n\n保留分段检查；调整为先列检查清单逐项打勾，使每次校对有明确依据。\n\n## 六、下月规划\n\n目标：下周期在校对任务中执行清单化检查。\n\n手段：校对前列出错字/格式/链接检查清单，逐项核对。\n\n检查方式：24小时内完成校对并能说出基于清单的通过标准。\n\n假说：清单化检查可减少遗漏，但证据不足以验证，需下周期数据确认。\n\n## 方向锚点缺席检查\n\n本期材料未识别出方向锚点，缺席检查无法完成；这是需要确认的校准信号，请下周期补记录。\n\n## 质量自检\n\n证据等级 B：下游沉淀不足，结论已按降级规则限制为核心洞察，未断言未经材料支持的长期模式。\n方向锚点不足：本期材料未识别出方向锚点，缺席检查无法完成；请下周期补记录。\n月报主主题不足：本月材料只归并出 0 个主主题，按证据不足披露，不硬凑。\n证据不足：材料仅1条日志与1条周报，覆盖1天，不足以支撑完整月报；方向锚点缺席；缺少对比基线。质量门已通过，但存在上述已知缺口。"
+      }
+    },
+    "agent": {
+      "id": "agent_c9bf3921a02d4df0a5bb0d0c12459114",
+      "title": "这是连通性验收，不要调用工具，只回复：连接正常。",
+      "status": "idle",
+      "messages": [
+        {
+          "id": "3ab07466-4351-41f3-90c3-ddade0da4294",
+          "role": "user",
+          "content": "这是连通性验收，不要调用工具，只回复：连接正常。",
+          "at": "2026-09-09T04:59:16.945Z"
+        },
+        {
+          "id": "b6a1b124-8f55-459a-a8e2-4d25f4e12d70",
+          "role": "assistant",
+          "content": "连接正常。",
+          "at": "2026-09-09T04:59:18.134Z"
+        }
+      ],
+      "createdAt": "2026-09-09T04:59:16.933Z",
+      "updatedAt": "2026-09-09T04:59:18.136Z"
+    }
+  },
+  "config": {
+    "providerId": "deepseek",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-flash",
+    "agentThinking": "enabled",
+    "hasApiKey": true
+  },
+  "window": {
+    "version": "2.6.13",
+    "zoom": 1,
+    "scale": 1.25
+  },
+  "layout": {
+    "width": 1186,
+    "height": 718,
+    "dpr": 1.25,
+    "bodyFont": "14px",
+    "editorFont": "17px",
+    "editorHeight": 212,
+    "editorScrollHeight": 417
+  },
+  "calls": [
+    {
+      "stream": false,
+      "maxTokens": 1200,
+      "thinking": {
+        "type": "disabled"
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 616,
+        "completion_tokens": 129,
+        "total_tokens": 745,
+        "prompt_tokens_details": {
+          "cached_tokens": 384
+        },
+        "prompt_cache_hit_tokens": 384,
+        "prompt_cache_miss_tokens": 232
+      },
+      "finish": "stop",
+      "contentLength": 286
+    },
+    {
+      "stream": false,
+      "maxTokens": 1200,
+      "thinking": {
+        "type": "disabled"
+      },
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 615,
+        "completion_tokens": 156,
+        "total_tokens": 771,
+        "prompt_tokens_details": {
+          "cached_tokens": 384
+        },
+        "prompt_cache_hit_tokens": 384,
+        "prompt_cache_miss_tokens": 231
+      },
+      "finish": "stop",
+      "contentLength": 334
+    },
+    {
+      "stream": false,
+      "maxTokens": 1800,
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 1442,
+        "completion_tokens": 780,
+        "total_tokens": 2222,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 359
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 1442
+      },
+      "finish": "stop",
+      "contentLength": 805
+    },
+    {
+      "stream": false,
+      "maxTokens": 2400,
+      "status": 200,
+      "usage": {
+        "prompt_tokens": 2007,
+        "completion_tokens": 1724,
+        "total_tokens": 3731,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1363
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2007
+      },
+      "finish": "stop",
+      "contentLength": 711
+    },
+    {
+      "stream": true,
+      "thinking": {
+        "type": "enabled"
+      },
+      "status": 200
+    }
+  ],
+  "reload": {
+    "reviews": [
+      {
+        "id": "review_b3e6b32f7bf84c91a7795f6726449fc4",
+        "type": "daily",
+        "length": 249
+      },
+      {
+        "id": "review_0d0cf3144da74b2ab6be740a6f8aff1d",
+        "type": "weekly",
+        "length": 767
+      },
+      {
+        "id": "review_11f6a476326a45dcb2cc83c2f664bd9c",
+        "type": "monthly",
+        "length": 760
+      }
+    ],
+    "sessions": 1
+  }
+}

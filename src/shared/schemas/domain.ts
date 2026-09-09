@@ -71,10 +71,13 @@ export type Journal = z.infer<typeof JournalSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type Review = z.infer<typeof ReviewSchema>;
 export type DailyGenerationResult =
+  | { kind: 'review'; review: Review; warning?: string; cached?: boolean }
+  | { kind: 'clarification'; question: string }
+  | { kind: 'error'; message: string; diagnostics: StructuredOutputDiagnostics };
+export type PeriodicGenerationResult =
   | { kind: 'review'; review: Review }
   | { kind: 'clarification'; question: string }
   | { kind: 'error'; message: string; diagnostics: StructuredOutputDiagnostics };
-export type PeriodicGenerationResult = { kind: 'review'; review: Review } | { kind: 'clarification'; question: string };
 export type InsightReviewType = Extract<Review['type'], 'coach' | 'yearly' | 'life-design'>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type VerifiedPattern = z.infer<typeof VerifiedPatternSchema>;
@@ -114,6 +117,26 @@ export const ProviderConfigSchema = z.object({
 export const PublicProviderConfigSchema = ProviderConfigSchema.extend({ hasApiKey: z.boolean() }).strict();
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type PublicProviderConfig = z.infer<typeof PublicProviderConfigSchema>;
+
+export const AiUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative().nullable(),
+  outputTokens: z.number().int().nonnegative().nullable(),
+  cachedInputTokens: z.number().int().nonnegative().nullable(),
+}).strict();
+export type AiUsage = z.infer<typeof AiUsageSchema>;
+
+/** 设置页连接测试返回的安全诊断；不包含 API Key、提示词或模型原文。 */
+export const AiConnectionTestResultSchema = z.object({
+  providerId: z.string().min(1),
+  model: z.string().min(1),
+  finishReason: z.string().nullable(),
+  outputLength: z.number().int().nonnegative(),
+  jsonValid: z.boolean(),
+  usage: AiUsageSchema.nullable(),
+  reasoningPresent: z.boolean(),
+  refusalPresent: z.boolean(),
+}).strict();
+export type AiConnectionTestResult = z.infer<typeof AiConnectionTestResultSchema>;
 
 const DataCategoryCountsSchema = z.object({
   journals: z.number().int().nonnegative(),

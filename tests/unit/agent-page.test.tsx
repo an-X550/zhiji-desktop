@@ -73,7 +73,7 @@ describe('AgentPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /周复盘/ }));
     expect(await screen.findByText('证据 1')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: '查看日志' })[0]);
-    expect(onNavigate).toHaveBeenCalledWith({ view: 'journal', intent: { type: 'records.journals' } });
+    expect(onNavigate).toHaveBeenCalledWith({ view: 'journal', intent: { type: 'records.journals', id: 'journal_e0' } });
   });
 
   it('clears only the selected session evidence when sending a new turn', async () => {

@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { appError } from '../../src/shared/errors/app-error';
 import { PERIODIC_REVIEW_COMPATIBILITY } from '../../src/main-process/skill-runtime/compatibility/periodic-review-v1';
 import { runPeriodicFeedback } from '../../src/main-process/skill-runtime/periodic-runtime';
 import type { Journal, Review } from '../../src/shared/schemas/domain';
@@ -22,6 +23,24 @@ const journal = (date: string, body = '完成了任务'): Journal => ({
 
 const dailyReview = (date: string): Review => ({
   schemaVersion: 2, id: `review_${date}`, type: 'daily', periodStart: date, periodEnd: date, sourceIds: [], sourceVersions: [], projectId: null, provider: 'openai-compatible', model: 'fake', promptVersion: 'daily-review-v2', createdAt: `${date}T10:00:00.000Z`, body: '反馈',
+});
+
+const weeklyReview = (date: string): Review => ({
+  schemaVersion: 1, id: `review_weekly${date.replaceAll('-', '')}`, type: 'weekly', periodStart: date, periodEnd: date, sourceIds: [`journal_${date}`], projectId: null, provider: 'openai-compatible', model: 'fake', promptVersion: 'periodic-review-v4', createdAt: `${date}T10:00:00.000Z`, body: '周反馈',
+});
+
+const validOutput = JSON.stringify({
+  chatSummary: '完成三个功能',
+  goalReview: '目标是交付切片',
+  resultEvaluation: '目标达成',
+  causesPositive: '上午关消息有效',
+  causesNegative: '晚间加班效果递减',
+  ifRedone: '会把测试前置',
+  nextPlan: { goal: '完成下一切片', means: '按 TDD 实施', check: '全量测试通过', hypothesis: null },
+  mainThemes: [],
+  escalationReminder: null,
+  directionAnchors: [{ name: '作息稳定', status: '有推进', note: '日志记录早睡' }],
+  qualitySelfCheck: '质量门已通过；无影响本次判断的已知缺口。',
 });
 
 describe('runPeriodicFeedback', () => {
@@ -71,6 +90,50 @@ describe('runPeriodicFeedback', () => {
     expect(result).toMatchObject({ kind: 'review', grade: 'A' });
     expect(collect).toHaveBeenCalledOnce();
     if (result.kind === 'review') expect(result.body).toContain('## 一、回顾目标');
+  });
+
+  it('retries one structured failure and uses the weekly output budget', async () => {
+    const collectStructured = vi.fn()
+      .mockResolvedValueOnce({ content: 'not-json', finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: validOutput, finishReason: 'stop' });
+    const result = await runPeriodicFeedback({
+      type: 'weekly', start: '2026-08-10', end: '2026-08-16',
+      journals: [journal('2026-08-10'), journal('2026-08-11'), journal('2026-08-12')],
+      reviews: [dailyReview('2026-08-10'), dailyReview('2026-08-11'), dailyReview('2026-08-12')],
+      provider: { collect: vi.fn(), collectStructured },
+    });
+    expect(result).toMatchObject({ kind: 'review', grade: 'A' });
+    expect(collectStructured).toHaveBeenCalledTimes(2);
+    expect(collectStructured.mock.calls[0][2]).toEqual({ maxTokens: 1800 });
+    expect(collectStructured.mock.calls[1][2]).toEqual({ maxTokens: 1800 });
+    expect(collectStructured.mock.calls[1][0][0].content).toContain('结构化输出');
+  });
+
+  it('classifies an empty length response as truncation before the one larger-budget retry', async () => {
+    const collectStructured = vi.fn()
+      .mockResolvedValueOnce({ content: '', finishReason: 'length' })
+      .mockResolvedValueOnce({ content: validOutput, finishReason: 'stop' });
+    const result = await runPeriodicFeedback({
+      type: 'weekly', start: '2026-08-10', end: '2026-08-16',
+      journals: [journal('2026-08-10'), journal('2026-08-11'), journal('2026-08-12')],
+      reviews: [dailyReview('2026-08-10'), dailyReview('2026-08-11'), dailyReview('2026-08-12')],
+      provider: { collect: vi.fn(), collectStructured },
+    });
+    expect(result).toMatchObject({ kind: 'review', grade: 'A' });
+    expect(collectStructured.mock.calls.map((call) => call[2])).toEqual([{ maxTokens: 1800 }, { maxTokens: 3600 }]);
+  });
+
+  it('uses the larger monthly output budget', async () => {
+    const collectStructured = vi.fn().mockResolvedValue({ content: validOutput, finishReason: 'stop' });
+    const result = await runPeriodicFeedback({
+      type: 'monthly', start: '2026-07-01', end: '2026-07-31',
+      journals: [journal('2026-07-01'), journal('2026-07-02'), journal('2026-07-03')],
+      reviews: [weeklyReview('2026-07-01'), weeklyReview('2026-07-08'), weeklyReview('2026-07-15')],
+      provider: { collect: vi.fn(), collectStructured },
+    });
+    expect(result).toMatchObject({ kind: 'review', grade: 'A' });
+    expect(collectStructured).toHaveBeenCalledOnce();
+    expect(collectStructured.mock.calls[0][2]).toEqual({ maxTokens: 2400 });
   });
 
   it('discloses the B-grade downgrade in the rendered quality self-check', async () => {
@@ -137,5 +200,16 @@ describe('runPeriodicFeedback', () => {
       reviews: [dailyReview('2026-08-10'), dailyReview('2026-08-11'), dailyReview('2026-08-12')],
       provider: { collect },
     })).rejects.toThrow();
+  });
+
+  it('does not retry a provider failure', async () => {
+    const collectStructured = vi.fn().mockRejectedValue(appError({ code: 'NETWORK_TIMEOUT' }));
+    await expect(runPeriodicFeedback({
+      type: 'weekly', start: '2026-08-10', end: '2026-08-16',
+      journals: [journal('2026-08-10'), journal('2026-08-11'), journal('2026-08-12')],
+      reviews: [dailyReview('2026-08-10'), dailyReview('2026-08-11'), dailyReview('2026-08-12')],
+      provider: { collect: vi.fn(), collectStructured },
+    })).rejects.toMatchObject({ code: 'NETWORK_TIMEOUT' });
+    expect(collectStructured).toHaveBeenCalledOnce();
   });
 });

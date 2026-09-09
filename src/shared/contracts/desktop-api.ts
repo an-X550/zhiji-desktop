@@ -1,4 +1,4 @@
-import type { BackupExportOutcome, DailyGenerationResult, DataDirectoryInfo, Journal, JournalTemplate, PeriodicGenerationResult, Profile, Project, PublicProviderConfig, RestorePreviewOutcome, RestoreResult, Review, ReviewPreview, VerifiedPattern, VerifiedPatternCandidate } from '../schemas/domain';
+import type { AiConnectionTestResult, BackupExportOutcome, DailyGenerationResult, DataDirectoryInfo, Journal, JournalTemplate, PeriodicGenerationResult, Profile, Project, PublicProviderConfig, RestorePreviewOutcome, RestoreResult, Review, ReviewPreview, VerifiedPattern, VerifiedPatternCandidate } from '../schemas/domain';
 import type { AgentEvent, AgentSession } from '../schemas/agent';
 import type { AgentConfirmInput, AgentSendInput, AgentSessionInput, AgentStartInput, ChangeDataRootInput, ConfirmPatternInput, CreateJournalInput, CreateProjectInput, InsightReviewGenerateInput, InsightReviewPreviewInput, JournalQuery, PeriodicReviewGenerateInput, PeriodicReviewPreviewInput, ProposePatternsInput, RenameProjectInput, SaveProfileInput, SaveProviderConfigInput, SaveTemplateInput, UpdateJournalInput } from '../schemas/ipc';
 
@@ -55,11 +55,11 @@ export interface ZhijiDesktopApi {
   settings: {
     getPublicConfig(): Promise<PublicProviderConfig>;
     save(input: SaveProviderConfigInput): Promise<PublicProviderConfig>;
-    testConnection(input: SaveProviderConfigInput): Promise<void>;
+    testConnection(input: SaveProviderConfigInput): Promise<AiConnectionTestResult>;
     clearApiKey(): Promise<PublicProviderConfig>;
   };
   reviews: {
-    generateDaily(input: { date: string; regenerate?: boolean }): Promise<DailyGenerationResult>;
+    generateDaily(input: { date: string; journalId?: string; regenerate?: boolean }): Promise<DailyGenerationResult>;
     list(): Promise<Review[]>;
     cancel(): Promise<void>;
     preview(input: PeriodicReviewPreviewInput): Promise<ReviewPreview>;

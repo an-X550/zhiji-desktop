@@ -1,0 +1,43 @@
+{
+  "revision": "light-refinement",
+  "scope": "offline sample only",
+  "viewports": [
+    {
+      "width": 1186,
+      "height": 718,
+      "dark": "light",
+      "overflow": false,
+      "saveBottom": 643,
+      "editorHeight": 268
+    },
+    {
+      "width": 1186,
+      "height": 718,
+      "dark": "dark",
+      "overflow": false,
+      "saveBottom": 643,
+      "editorHeight": 268
+    },
+    {
+      "width": 960,
+      "height": 600,
+      "dark": "dark",
+      "overflow": false,
+      "saveBottom": 544,
+      "editorHeight": 223.40625
+    }
+  ],
+  "emptyDisabled": true,
+  "filledEnabled": true,
+  "escapeKeepsFocus": true,
+  "comparisonInert": true,
+  "comparisonRestored": true,
+  "contrast": {
+    "lightMutedOnPaper": 5.53,
+    "lightMutedOnRail": 4.95,
+    "lightButton": 6.27,
+    "darkMutedOnPaper": 7.5,
+    "darkButton": 7.46
+  },
+  "pageErrors": []
+}

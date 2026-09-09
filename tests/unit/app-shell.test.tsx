@@ -10,6 +10,9 @@ describe('AppShell', () => {
 
     expect(screen.getAllByRole('button', { name: /开始|知己 Agent|日志|复盘|项目|设置/ })).toHaveLength(6);
     expect(screen.getByRole('button', { name: '复盘' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('记录，分析，行动')).toBeInTheDocument();
+    expect(document.querySelector('.topbar__context')).toHaveTextContent('复盘');
+    expect(screen.queryByText('本地优先')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '日志' }));
     expect(onNavigate).toHaveBeenCalledWith({ view: 'journal' });
     expect(screen.getByText('本地保存')).toBeInTheDocument();

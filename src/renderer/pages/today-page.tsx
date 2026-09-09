@@ -4,14 +4,14 @@ import type { Journal, JournalTemplate, Project, Review } from '../../shared/sch
 import type { NavigationIntent, NavigationTarget } from '../app/navigation';
 import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
-import { EmptyState } from '../components/empty-state';
-import { Field } from '../components/field';
-import { PageHeader } from '../components/page-header';
 import { StatusBanner } from '../components/status-banner';
-import { MarkdownDocument } from '../components/markdown-document';
+import { StructuredDiagnostics } from '../components/structured-diagnostics';
+import { ArrowRightIcon, ChevronRightIcon, HistoryIcon, LockIcon, ProjectsIcon, ReviewsIcon, TodayIcon } from '../components/icons';
+import { DailyFeedbackPanel } from '../features/daily-feedback-panel';
 import { TemplateManager } from '../features/templates/template-manager';
 import { RecordBrowser } from './history-page';
 import { toLocalDateString } from '../utils/local-date';
+import { safeGenerationError } from '../utils/safe-generation-error';
 
 const today = toLocalDateString();
 
@@ -24,16 +24,19 @@ const TASK_PHASE_LABELS: Record<string, string> = {
   saving: '正在保存到本机…',
 };
 
-function safeGenerationError(reason: unknown): string {
-  if (reason instanceof Error) {
-    const message = reason.message.replace(/^Error invoking remote method '[^']+':\s*/, '').trim();
-    if (message && message.length <= 140 && !/[\\/]|https?:\/\//i.test(message)) return `生成失败：${message}`;
-  }
-  return '生成失败：请检查 AI 设置或稍后重试。';
+function formatJournalDate(value: string) {
+  const parsed = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return { title: value, year: '', weekday: '' };
+  return {
+    title: `${parsed.getMonth() + 1}月${parsed.getDate()}日`,
+    year: `${parsed.getFullYear()}年`,
+    weekday: new Intl.DateTimeFormat('zh-CN', { weekday: 'long' }).format(parsed),
+  };
 }
 
 export function TodayPage({ journals, projects, reviews, intent, hasApiKey = true, onRefresh, onNavigate, onDirtyChange }: { journals: Journal[]; projects: Project[]; reviews: Review[]; intent?: NavigationIntent; hasApiKey?: boolean; onRefresh(): Promise<void> | void; onNavigate(target: NavigationTarget): void; onDirtyChange?(dirty: boolean): void }) {
   const [section, setSection] = useState<'compose' | 'records'>(intent?.type === 'records.journals' ? 'records' : 'compose');
+  const [workspace, setWorkspace] = useState<'journal' | 'feedback'>('journal');
   const [date, setDate] = useState(today);
   const [body, setBody] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -42,7 +45,7 @@ export function TodayPage({ journals, projects, reviews, intent, hasApiKey = tru
   const [saveMessage, setSaveMessage] = useState('');
   const [reviewState, setReviewState] = useState<'idle' | 'loading' | 'success' | 'error' | 'info'>('idle');
   const [reviewMessage, setReviewMessage] = useState('');
-  const [dailyReviewBody, setDailyReviewBody] = useState<string | null>(null);
+  const [localReview, setLocalReview] = useState<{ date: string; journalId: string; review: Review } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [taskPhase, setTaskPhase] = useState('');
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -50,57 +53,227 @@ export function TodayPage({ journals, projects, reviews, intent, hasApiKey = tru
   const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
   const [dailyFailure, setDailyFailure] = useState<StructuredOutputDiagnostics | null>(null);
   const [retryDate, setRetryDate] = useState<string | null>(null);
+  const [retryJournalId, setRetryJournalId] = useState<string | null>(null);
+  const [historySelectionId, setHistorySelectionId] = useState<string | undefined>(intent?.type === 'records.journals' ? intent.id : undefined);
+  const [generatingDate, setGeneratingDate] = useState<string | null>(null);
+  const [generatingJournalId, setGeneratingJournalId] = useState<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const dirty = Boolean(body.trim()) || Boolean(editing);
+  const dateControlRef = useRef<HTMLDetailsElement>(null);
+  const draftRevisionRef = useRef(0);
+  const saveInFlightRef = useRef<Promise<Journal | null> | null>(null);
+  const reviewInFlightRef = useRef(false);
+  const suppressAutoLoadRef = useRef(false);
+  const contextRef = useRef({ section, date, historySelectionId });
+  contextRef.current = { section, date, historySelectionId };
+  const matchesSavedJournal = Boolean(editing
+    && editing.date === date
+    && editing.body === body
+    && (editing.projectIds[0] ?? '') === projectId);
+  const dirty = editing ? !matchesSavedJournal : Boolean(body.trim());
+  const sameDayJournals = useMemo(() => journals.filter((item) => item.date === date && item.body.trim()), [journals, date]);
+
+  const clearSaveStatus = () => { setSaveState('idle'); setSaveMessage(''); };
+  const markDraftChanged = () => { draftRevisionRef.current += 1; clearSaveStatus(); };
   // 未保存时先弹确认框，确认后才执行动作；干净时直接执行
   const guardDiscard = (action: () => void) => { if (dirty) setPendingDiscard(() => action); else action(); };
 
   useEffect(() => {
-    if (intent?.type === 'records.journals') setSection('records');
+    if (intent?.type === 'records.journals') {
+      setSection('records');
+      setHistorySelectionId(intent.id);
+    }
     if (intent?.type === 'journal.compose' || intent?.type === 'journal.generate-daily') {
       setSection('compose');
       window.setTimeout(() => editorRef.current?.focus(), 0);
     }
   }, [intent]);
+  useEffect(() => {
+    if (section !== 'compose' || suppressAutoLoadRef.current || dirty || editing || body.trim()) return;
+    const candidates = journals.filter((item) => item.date === date && item.body.trim());
+    if (candidates.length !== 1) return;
+    const journal = candidates[0];
+    draftRevisionRef.current += 1;
+    setEditing(journal);
+    setBody(journal.body);
+    setProjectId(journal.projectIds[0] ?? '');
+    setWorkspace('journal');
+    clearSaveStatus();
+  }, [body, date, dirty, editing, journals, section]);
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false); }, [dirty, onDirtyChange]);
   useEffect(() => window.zhiji.reviews.onTaskPhase((phase) => setTaskPhase(TASK_PHASE_LABELS[phase] ?? '')), []);
   useEffect(() => { void window.zhiji.templates.list().then(setTemplates).catch(() => undefined); }, []);
 
-  const weekStart = useMemo(() => { const value = new Date(`${today}T12:00:00`); value.setDate(value.getDate() - ((value.getDay() || 7) - 1)); return value.toISOString().slice(0, 10); }, []);
-  const weeklyJournals = journals.filter((item) => item.date >= weekStart && item.date <= today);
-  const recent = journals.filter((item) => item.date !== today).slice().reverse().slice(0, 3);
+  const displayDate = useMemo(() => formatJournalDate(date), [date]);
 
-  const save = async () => {
+  const save = async (): Promise<Journal | null> => {
     if (!body.trim()) return null;
-    setSaveState('loading'); setSaveMessage('');
-    try {
-      const common = { date, body, projectIds: projectId ? [projectId] : [] };
-      const saved = editing
-        ? await window.zhiji.journals.update({ ...common, id: editing.id, expectedUpdatedAt: editing.updatedAt })
-        : await window.zhiji.journals.create(common);
-      setSaveState('success'); setSaveMessage('已保存到本机'); setBody(''); setEditing(null); await onRefresh(); return saved;
-    } catch (reason) { setSaveState('error'); setSaveMessage(`保存失败：${reason instanceof Error ? reason.message : '请稍后重试'}`); return null; }
-  };
-  const runDailyReview = async (reviewDate: string, pendingBody: boolean) => {
-    setReviewState('loading'); setReviewMessage(''); setDailyReviewBody(null); setDailyFailure(null); setRetryDate(null);
-    try {
-      if (pendingBody) { const journal = await save(); if (!journal) return; }
-      const result = await window.zhiji.reviews.generateDaily({ date: reviewDate });
-      if (result.kind === 'clarification') { setReviewState('info'); setReviewMessage(result.question); return; }
-      if (result.kind === 'error') {
-        setReviewState('error'); setReviewMessage(result.message); setDailyFailure(result.diagnostics); setRetryDate(reviewDate); return;
+    if (saveInFlightRef.current) return saveInFlightRef.current;
+    const snapshot = { date, body, projectId, editing };
+    const revisionAtStart = draftRevisionRef.current;
+    const request = (async () => {
+      setSaveState('loading');
+      setSaveMessage('');
+      try {
+        const common = { date: snapshot.date, body: snapshot.body, projectIds: snapshot.projectId ? [snapshot.projectId] : [] };
+        const saved = snapshot.editing
+          ? await window.zhiji.journals.update({ ...common, id: snapshot.editing.id, expectedUpdatedAt: snapshot.editing.updatedAt })
+          : await window.zhiji.journals.create(common);
+        if (!saved) throw new Error('保存服务未返回日志。');
+        const draftStillMatches = draftRevisionRef.current === revisionAtStart
+          && date === snapshot.date
+          && body === snapshot.body
+          && projectId === snapshot.projectId;
+        setSaveState('success');
+        setSaveMessage(draftStillMatches ? '已保存到本机' : '已保存到本机；你有新的修改');
+        // 始终绑定服务端返回的 ID；只在没有新输入时回填字段，避免迟到响应覆盖草稿。
+        setEditing(saved);
+        if (draftStillMatches) {
+          setBody(saved.body);
+          setDate(saved.date);
+          setProjectId(saved.projectIds[0] ?? '');
+        }
+        try { await onRefresh(); } catch { /* 正文已经保存，刷新失败不改写保存结果。 */ }
+        return saved;
+      } catch (reason) {
+        setSaveState('error');
+        setSaveMessage(`保存失败：${reason instanceof Error ? reason.message : '请稍后重试'}`);
+        return null;
       }
-      await onRefresh(); setReviewState('success'); setReviewMessage('今日反馈已生成'); setDailyReviewBody(result.review.body);
-    } catch (reason) { setReviewState('error'); setReviewMessage(safeGenerationError(reason)); setRetryDate(reviewDate); }
+    })();
+    saveInFlightRef.current = request;
+    try { return await request; }
+    finally { if (saveInFlightRef.current === request) saveInFlightRef.current = null; }
   };
-  const generate = async () => {
-    const reviewDate = body.trim() ? date : (journals.some((item) => item.date === today) ? today : null);
-    if (!reviewDate) { setReviewState('error'); setReviewMessage('请先写下并保存今日日志'); return; }
-    await runDailyReview(reviewDate, Boolean(body.trim()));
-  };
-  const generateForDate = async (reviewDate: string) => {
+
+  const runDailyReview = async (request: { date: string; journalId?: string; regenerate?: boolean }, pendingBody: boolean) => {
+    if (reviewInFlightRef.current) return;
     if (!hasApiKey) { onNavigate({ view: 'settings', settingsSection: 'ai' }); return; }
-    await runDailyReview(reviewDate, false);
+    reviewInFlightRef.current = true;
+    const sectionAtStart = section;
+    const selectionAtStart = historySelectionId;
+    const revisionBeforeSave = draftRevisionRef.current;
+    let reviewDate = request.date;
+    let journalId = request.journalId ?? (section === 'compose' ? editing?.id : undefined);
+    setGeneratingDate(reviewDate);
+    setGeneratingJournalId(journalId ?? null);
+    setReviewState('loading');
+    setReviewMessage('');
+    setDailyFailure(null);
+    setRetryDate(null);
+    setRetryJournalId(null);
+    const surfaceMatches = () => {
+      const current = contextRef.current;
+      return sectionAtStart === 'records'
+        ? current.section === 'records' && current.historySelectionId === selectionAtStart
+        : current.section === 'compose' && current.date === reviewDate;
+    };
+    try {
+      if (pendingBody) {
+        const journal = await save();
+        if (!journal) {
+          setReviewState('idle');
+          return;
+        }
+        reviewDate = journal.date;
+        journalId = journal.id;
+        setGeneratingDate(reviewDate);
+        setGeneratingJournalId(journalId);
+        if (draftRevisionRef.current !== revisionBeforeSave || contextRef.current.date !== reviewDate) {
+          if (!surfaceMatches()) return;
+          setReviewState('info');
+          setReviewMessage('日志已保存；你有新的修改，确认后再生成反馈。');
+          return;
+        }
+      }
+      if (!journalId) {
+        const candidates = journals.filter((item) => item.date === reviewDate && item.body.trim());
+        if (candidates.length !== 1) {
+          if (surfaceMatches()) {
+            setReviewState('info');
+            setReviewMessage(candidates.length > 1 ? '这一天有多条日志，请先从过去日志中选择一条。' : '请先保存一条日志，再生成反馈。');
+          }
+          return;
+        }
+        journalId = candidates[0].id;
+        setGeneratingJournalId(journalId);
+      }
+      const revisionAtGeneration = draftRevisionRef.current;
+      const result = await window.zhiji.reviews.generateDaily({ date: reviewDate, journalId, ...(request.regenerate ? { regenerate: true } : {}) });
+      if (result.kind === 'clarification') {
+        if (!surfaceMatches()) return;
+        setReviewState('info');
+        setReviewMessage(result.question);
+        return;
+      }
+      if (result.kind === 'error') {
+        if (!surfaceMatches()) return;
+        setReviewState('error');
+        setReviewMessage(result.message);
+        setDailyFailure(result.diagnostics);
+        setRetryDate(reviewDate);
+        setRetryJournalId(journalId);
+        return;
+      }
+      try { await onRefresh(); } catch { /* 生成结果仍由本地返回值展示。 */ }
+      const sameContext = draftRevisionRef.current === revisionAtGeneration
+        && (sectionAtStart === 'records'
+          ? section === 'records' && historySelectionId === selectionAtStart
+          : section === 'compose' && date === reviewDate);
+      if (sameContext) {
+        setLocalReview({ date: reviewDate, journalId, review: result.review });
+        setWorkspace('feedback');
+      }
+      if (surfaceMatches()) {
+        setReviewState('success');
+        setReviewMessage(sameContext
+          ? (result.cached ? '已读取本机已有反馈' : `这一天的反馈已生成并保存${result.warning ? `；${result.warning}` : ''}`)
+          : '反馈已生成并保存；你有新的修改，当前编辑内容未被覆盖。');
+      }
+    } catch (reason) {
+      if (!surfaceMatches()) return;
+      setReviewState('error');
+      setReviewMessage(safeGenerationError(reason));
+      setRetryDate(reviewDate);
+      setRetryJournalId(journalId ?? null);
+    } finally {
+      reviewInFlightRef.current = false;
+      setGeneratingDate(null);
+      setGeneratingJournalId(null);
+    }
+  };
+
+  const startNewJournal = () => guardDiscard(() => {
+    draftRevisionRef.current += 1;
+    suppressAutoLoadRef.current = true;
+    setEditing(null);
+    setBody('');
+    setDate(today);
+    setProjectId('');
+    setWorkspace('journal');
+    clearSaveStatus();
+    setReviewState('idle');
+    setReviewMessage('');
+    setDailyFailure(null);
+    setRetryDate(null);
+    setRetryJournalId(null);
+  });
+  const generate = async () => {
+    if (!body.trim()) {
+      setReviewState('info');
+      setReviewMessage('先写点内容，再保存或生成反馈。');
+      return;
+    }
+    await runDailyReview({ date, journalId: editing?.id }, dirty);
+  };
+  const generateForDate = async (request: { date: string; journalId: string; regenerate?: boolean }) => runDailyReview(request, false);
+  const retryDailyReview = () => {
+    if (!retryDate || !retryJournalId) return;
+    if (dirty && date === retryDate && editing?.id === retryJournalId && !body.trim()) {
+      setReviewState('info');
+      setReviewMessage('当前有未保存的空内容修改，请补充后再重试。');
+      return;
+    }
+    void runDailyReview({ date: retryDate, journalId: retryJournalId, regenerate: true }, dirty && date === retryDate && editing?.id === retryJournalId);
   };
   const removeJournal = async () => {
     if (!deleteId) return;
@@ -110,75 +283,144 @@ export function TodayPage({ journals, projects, reviews, intent, hasApiKey = tru
   const editJournal = (id: string) => guardDiscard(() => {
     const journal = journals.find((item) => item.id === id);
     if (!journal) return;
-    setEditing(journal); setDate(journal.date); setBody(journal.body); setProjectId(journal.projectIds[0] ?? '');
-    setSection('compose'); setSaveState('idle');
+    draftRevisionRef.current += 1;
+    setEditing(journal);
+    setDate(journal.date);
+    setBody(journal.body);
+    setProjectId(journal.projectIds[0] ?? '');
+    setSection('compose');
+    setWorkspace('journal');
+    suppressAutoLoadRef.current = false;
+    clearSaveStatus();
+    setReviewMessage('');
+    setReviewState('idle');
   });
+  const openSameDayRecords = () => {
+    setHistorySelectionId(sameDayJournals[0]?.id);
+    setSection('records');
+  };
 
-  const canGenerate = hasApiKey && date === today;
-  const primaryLabel = canGenerate ? (body.trim() ? '保存并生成今日反馈' : '生成今日反馈') : '保存日志';
+  const changeDate = (nextDate: string) => {
+    if (!nextDate || nextDate === date) return;
+    guardDiscard(() => {
+      draftRevisionRef.current += 1;
+      suppressAutoLoadRef.current = false;
+      setEditing(null);
+      setBody('');
+      setProjectId('');
+      setDate(nextDate);
+      setWorkspace('journal');
+      clearSaveStatus();
+      setReviewState('idle');
+      setReviewMessage('');
+      setDailyFailure(null);
+      setRetryDate(null);
+      setRetryJournalId(null);
+    });
+  };
 
-  return <>
-    {!hasApiKey && <div className="ai-hint"><span>日志可直接保存；配置后还能生成反馈。</span><Button variant="secondary" onClick={() => onNavigate({ view: 'settings', settingsSection: 'ai' })}>配置 AI</Button></div>}
-    <PageHeader
-      title={section === 'compose' ? '写一条日志' : '过去日志'}
-      description={section === 'compose' ? '选择今天或过去日期，真实地写就够了。' : '按日期找到过去的原始记录。'}
-      action={<div className="page-tabs">
-        <button className={section === 'compose' ? 'is-active' : ''} onClick={() => setSection('compose')}>写日志</button>
-        <button className={section === 'records' ? 'is-active' : ''} onClick={() => guardDiscard(() => setSection('records'))}>过去日志</button>
-      </div>}
-    />
+  const canGenerate = hasApiKey;
+  const primaryLabel = canGenerate ? (body.trim() ? (date === today ? '保存并生成今日反馈' : '保存并生成这一天的反馈') : '保存并生成反馈') : '保存日志';
+  const busy = saveState === 'loading' || reviewState === 'loading';
+  const draftLabel = dirty ? (editing ? '编辑中' : '尚未保存') : editing ? '已保存' : '尚未保存';
+  const closeDateControl = () => {
+    const node = dateControlRef.current;
+    if (!node?.open) return;
+    node.open = false;
+    node.querySelector<HTMLElement>('summary')?.focus();
+  };
+
+  return <div className={`today-page today-page--${section}`}>
+    <header className="journal-toolbar">
+      <div className="journal-toolbar__title"><h1>日志</h1><span className="journal-toolbar__divider" aria-hidden="true"/><span>留下一段真实经历</span></div>
+      <div className="journal-mode-switch" role="group" aria-label="日志模式">
+        <button type="button" className={section === 'compose' ? 'is-active' : ''} aria-pressed={section === 'compose'} onClick={() => setSection('compose')}><TodayIcon aria-hidden="true"/>写日志</button>
+        <button type="button" className={section === 'records' ? 'is-active' : ''} aria-pressed={section === 'records'} onClick={() => guardDiscard(() => setSection('records'))}><HistoryIcon aria-hidden="true"/>过去日志</button>
+      </div>
+    </header>
     {section === 'records' ? <>
-      {reviewMessage && <StatusBanner tone={reviewState === 'error' ? 'error' : reviewState === 'success' ? 'success' : 'info'}>{reviewMessage}</StatusBanner>}
-      {dailyReviewBody && <article className="card inline-review"><MarkdownDocument>{dailyReviewBody}</MarkdownDocument></article>}
-      <RecordBrowser journals={journals} reviews={reviews} projects={projects} allowedKinds={['journal']} onDelete={(item) => { setDeleteId(item.id); setReviewMessage(''); }} onGenerateDaily={(selectedDate) => void generateForDate(selectedDate)} onEditJournal={editJournal}/>
+      <div className="journal-records-content">
+        <div className="records-heading"><h2>过去日志</h2><p>按日期找到过去的原始记录，反馈也固定放在所选日志旁边。</p></div>
+        {reviewMessage && <StatusBanner tone={reviewState === 'error' ? 'error' : reviewState === 'success' ? 'success' : 'info'}>{reviewMessage}</StatusBanner>}
+        <RecordBrowser journals={journals} reviews={reviews} projects={projects} allowedKinds={['journal']} initialSelectedId={historySelectionId} hasApiKey={hasApiKey} dailyReviewOverride={localReview?.review} generatingDate={generatingDate ?? undefined} generatingJournalId={generatingJournalId} dailyFeedbackMessage={generatingDate ? reviewMessage : undefined} onSelectionChange={setHistorySelectionId} onDelete={(item) => { setDeleteId(item.id); setReviewMessage(''); }} onGenerateDaily={(request) => void generateForDate(request)} onConfigureAi={() => onNavigate({ view: 'settings', settingsSection: 'ai' })} onEditJournal={editJournal}/>
+      </div>
       <ConfirmDialog open={deleteId !== null} title="移除这条日志？" description="已有复盘不会同步删除。" confirmLabel="确认移除" onCancel={() => setDeleteId(null)} onConfirm={() => void removeJournal()}/>
     </> : <>
-      <div className="today-grid">
-        <section className="card editor-card">
-          <Field label="日志日期"><input aria-label="日志日期" type="date" max={today} value={date} onChange={(event) => { setDate(event.target.value); setSaveState('idle'); }}/></Field>
-          <Field label="关联项目（可选）"><select value={projectId} onChange={(event) => { setProjectId(event.target.value); setSaveState('idle'); }}><option value="">不关联项目</option>{projects.filter((item) => item.status === 'active').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
-          <Field label="日志内容">
-            <div className="editor-meta template-entry" style={{ marginBottom: 8 }}>
-              <select aria-label="选择模板" value="" onChange={(event) => { if (event.target.value) { const tpl = templates.find((t) => t.name === event.target.value); if (tpl) setBody((old) => (old ? `${old}\n\n${tpl.body}` : tpl.body)); setSaveState('idle'); } event.target.value = ''; }}>
-                <option value="">从模板开始…</option>
-                {templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-              </select>
-              <button type="button" className="reader-actions" style={{ border: 0, background: 'transparent', color: 'var(--accent)', font: 'var(--text-footnote)', fontWeight: 600, cursor: 'pointer' }} onClick={() => setTemplateManagerOpen(true)}>管理模板</button>
+      <div className="journal-stage">
+        <h2 className="visually-hidden">写一条日志</h2>
+        <section className="journal-surface" aria-label="日志编辑器">
+          <header className="journal-head">
+            <div>
+              <div className="date-heading"><h2>{displayDate.title}</h2><span>{displayDate.weekday}</span></div>
+              <details ref={dateControlRef} className="date-control" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); closeDateControl(); } }}>
+                <summary><span>{displayDate.year}</span><span>更改日期</span><ChevronRightIcon aria-hidden="true"/></summary>
+                <div className="date-popover"><label htmlFor="journal-date-input">日志日期</label><input id="journal-date-input" aria-label="日志日期" type="date" max={today} value={date} onChange={(event) => { changeDate(event.target.value); closeDateControl(); }}/></div>
+              </details>
             </div>
-            <textarea ref={editorRef} aria-label="日志内容" value={body} onChange={(event) => { setBody(event.target.value); setSaveState('idle'); }} placeholder={templates.length ? '选择模板或直接开始记录…' : '发生了什么？你做了什么？结果怎样？'}/>
-          </Field>
-          <div className="editor-meta"><span className="tag">{date === today ? '今天' : date}</span><span className="tag">{body.length} 字</span></div>
-          {date < today && <p className="muted">补写历史日志只保存，不会自动生成 AI 反馈。</p>}
-          {saveMessage && <StatusBanner tone={saveState === 'error' ? 'error' : 'success'}>{saveMessage}</StatusBanner>}
-          <div className="button-row">
-            {canGenerate && body.trim() && <Button variant="ghost" loading={saveState === 'loading'} onClick={() => void save()}>仅保存日志</Button>}
-            <Button variant="primary" loading={canGenerate ? reviewState === 'loading' : saveState === 'loading'} disabled={!body.trim() && !(canGenerate && journals.some((item) => item.date === today))} onClick={() => void (canGenerate ? generate() : save())}>{primaryLabel}</Button>
+            <span className="draft-state"><TodayIcon aria-hidden="true"/><span>{draftLabel}</span></span>
+          </header>
+          <nav className="journal-workspace-switch" aria-label="日志工作区">
+            <button type="button" className={workspace === 'journal' ? 'is-active' : ''} aria-pressed={workspace === 'journal'} onClick={() => setWorkspace('journal')}>日志</button>
+            <button type="button" className={workspace === 'feedback' ? 'is-active' : ''} aria-pressed={workspace === 'feedback'} onClick={() => setWorkspace('feedback')}>日分析</button>
+          </nav>
+          {!editing && sameDayJournals.length > 0 && <div className="same-day-notice" role="note">
+            <div><strong>这一天已有 {sameDayJournals.length} 条日志。</strong><span>先从过去日志中选择要继续编辑或分析的那一条。</span></div>
+            {sameDayJournals.length === 1
+              ? <Button variant="ghost" onClick={() => editJournal(sameDayJournals[0].id)}>继续编辑已有日志</Button>
+              : <Button variant="ghost" onClick={openSameDayRecords}>查看已有日志</Button>}
+          </div>}
+          {workspace === 'journal' ? <>
+          <div className="journal-tools">
+            <label className="tool-chip"><ProjectsIcon aria-hidden="true"/><span className="tool-chip__label">项目</span><select aria-label="关联项目（可选）" value={projectId} onChange={(event) => { markDraftChanged(); setProjectId(event.target.value); }}><option value="">不关联项目</option>{projects.filter((item) => item.status === 'active').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label className="tool-chip"><ReviewsIcon aria-hidden="true"/><span className="tool-chip__label">模板</span><select aria-label="选择模板" value="" onChange={(event) => { if (event.target.value) { const tpl = templates.find((t) => t.name === event.target.value); if (tpl) { markDraftChanged(); setBody((old) => (old ? `${old}\n\n${tpl.body}` : tpl.body)); } } event.currentTarget.value = ''; }}><option value="">日志模板</option>{templates.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}</select></label>
+            <button type="button" className="template-entry__manage" onClick={() => setTemplateManagerOpen(true)}>管理模板</button>
           </div>
+          <div className="writing">
+            {!body.trim() && <p className="writing-hint">不必组织得很完整。先记下发生了什么。</p>}
+            <textarea ref={editorRef} aria-label="日志内容" value={body} onChange={(event) => { markDraftChanged(); setBody(event.target.value); }} placeholder="今天，有什么值得记下来？"/>
+          </div>
+          {saveMessage && <StatusBanner tone={saveState === 'error' ? 'error' : 'success'}>{saveMessage}</StatusBanner>}
+          <footer className="composer-footer">
+            <span className="word-count">{body.length} 字</span>
+            <div className="save-actions">
+              {editing && <Button variant="ghost" onClick={startNewJournal}>新建日志</Button>}
+              {canGenerate && <Button variant="secondary" loading={saveState === 'loading'} disabled={busy || !body.trim()} onClick={() => void save()}>{date === today ? '仅保存日志' : '保存日志'}</Button>}
+              <Button variant="primary" loading={busy} disabled={busy || !body.trim()} onClick={() => void (canGenerate ? generate() : save())}>{primaryLabel}{canGenerate && <ArrowRightIcon aria-hidden="true"/>}</Button>
+            </div>
+          </footer>
           {reviewState === 'loading' && <StatusBanner tone="info">{taskPhase || '正在根据日志生成反馈…'}</StatusBanner>}
           {reviewState !== 'loading' && reviewMessage && <StatusBanner tone={reviewState === 'error' ? 'error' : reviewState === 'success' ? 'success' : 'info'}>{reviewMessage}</StatusBanner>}
           {reviewState === 'error' && retryDate && <div className="review-failure-actions">
-            <Button variant="secondary" onClick={() => void runDailyReview(retryDate, false)}>重新生成</Button>
-            {dailyFailure && <details><summary>查看技术信息</summary><dl className="diagnostic-list"><div><dt>失败类型</dt><dd>{dailyFailure.kind}</dd></div><div><dt>结束原因</dt><dd>{dailyFailure.finishReason ?? '未提供'}</dd></div><div><dt>输出长度</dt><dd>{dailyFailure.outputLength}</dd></div>{dailyFailure.schemaPaths.length > 0 && <div><dt>字段位置</dt><dd>{dailyFailure.schemaPaths.join('、')}</dd></div>}</dl></details>}
+            <Button variant="secondary" onClick={retryDailyReview}>重新生成</Button>
+            {dailyFailure && <StructuredDiagnostics diagnostics={dailyFailure}/>}
           </div>}
-          {dailyReviewBody && <article className="card inline-review">
-            <MarkdownDocument>{dailyReviewBody}</MarkdownDocument>
-          </article>}
+          </> : <>
+            {saveMessage && <StatusBanner tone={saveState === 'error' ? 'error' : 'success'}>{saveMessage}</StatusBanner>}
+            <DailyFeedbackPanel
+              date={date}
+              journal={editing ?? (sameDayJournals.length === 1 ? sameDayJournals[0] : undefined)}
+              journals={journals}
+              reviews={reviews}
+              overrideReview={localReview?.date === date && localReview.journalId === (editing?.id ?? sameDayJournals[0]?.id) ? localReview.review : undefined}
+              hasApiKey={hasApiKey}
+              isGenerating={generatingDate === date && generatingJournalId === (editing?.id ?? sameDayJournals[0]?.id)}
+              message={reviewMessage}
+              onGenerate={(request) => void runDailyReview(request, dirty && request.journalId === editing?.id)}
+              onConfigureAi={() => onNavigate({ view: 'settings', settingsSection: 'ai' })}
+            />
+            {reviewState === 'error' && retryDate && <div className="review-failure-actions">
+              <Button variant="secondary" onClick={retryDailyReview}>重新生成</Button>
+              {dailyFailure && <StructuredDiagnostics diagnostics={dailyFailure}/>}
+            </div>}
+          </>}
         </section>
-        <aside className="today-side">
-          <section className="card week-card">
-            <h3>本周记录</h3>
-            <p><strong>{weeklyJournals.length}</strong> 篇日志 · <strong>{reviews.filter((item) => item.type === 'daily' && item.periodStart >= weekStart).length}</strong> 次日反馈</p>
-            <p className="muted">需要整体回看时，再进入复盘。</p>
-            <Button variant="secondary" onClick={() => onNavigate({ view: 'reviews' })}>做复盘</Button>
-          </section>
-        </aside>
+        <div className="context-note">
+          <span><LockIcon aria-hidden="true"/>{!hasApiKey ? '日志可直接保存；配置后还能生成反馈。' : '生成反馈时，所选日期的日志会发送给你配置的 AI 服务。'}</span>
+          {hasApiKey ? <span className="context-note__status">已配置 AI 服务</span> : <button className="context-link" onClick={() => onNavigate({ view: 'settings', settingsSection: 'ai' })}>配置 AI</button>}
+        </div>
       </div>
-      <section className="recent-section">
-        <div className="section-heading"><h3>最近记录</h3><button onClick={() => guardDiscard(() => setSection('records'))}>查看全部</button></div>
-        {recent.length ? <div className="recent-list">{recent.map((item) => <article className="recent-item" data-testid="recent-journal" key={item.id}><time>{item.date}</time><span>{item.body.slice(0, 80)}</span></article>)}</div> : <EmptyState title="还没有过去日志" description="保存今天的日志后，它会出现在这里。"/>}
-      </section>
     </>}
     <ConfirmDialog open={pendingDiscard !== null} title="放弃未保存的内容？" description="这条日志还没有保存，继续操作会丢失未保存的内容。" confirmLabel="放弃" onCancel={() => setPendingDiscard(null)} onConfirm={() => { const action = pendingDiscard; setPendingDiscard(null); action?.(); }}/>
     <TemplateManager open={templateManagerOpen} templates={templates} onClose={() => setTemplateManagerOpen(false)} onChanged={setTemplates}/>
-  </>;
+  </div>;
 }

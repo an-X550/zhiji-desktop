@@ -6,7 +6,7 @@
 
 它不是整个 zhiji，也不是通用电脑控制 Agent：不运行 Claude/Codex Skill，不要求 DeepSeek Harness，不提供云同步、Shell、任意文件操作或浏览器控制。
 
-- [下载 v2.6.5](https://github.com/an-X550/zhiji-Desktop-Agent/releases/tag/v2.6.5)
+- [下载 v2.6.15](https://github.com/an-X550/zhiji-Desktop-Agent/releases/tag/v2.6.15)
 - [提交问题](https://github.com/an-X550/zhiji-Desktop-Agent/issues)
 - [查看主项目](https://github.com/an-X550/zhiji)
 - 许可证：[MIT](LICENSE)
@@ -31,7 +31,7 @@
 
 ### 1. 安装
 
-从 [v2.6.5 Release](https://github.com/an-X550/zhiji-Desktop-Agent/releases/tag/v2.6.5) 下载 `Zhiji-Setup-v2.6.5.exe`。GitHub 自动生成的 `Source code (zip)` 是源码，不是安装程序。
+从 [v2.6.15 Release](https://github.com/an-X550/zhiji-Desktop-Agent/releases/tag/v2.6.15) 下载 `Zhiji-Setup-v2.6.15.exe`。GitHub 自动生成的 `Source code (zip)` 是源码，不是安装程序。
 
 当前安装包未进行代码签名，也不承诺应用内自动更新或完整的 Windows 10/11 干净机安装矩阵。SmartScreen 显示“未知发布者”时，请先确认下载来源。
 
@@ -142,7 +142,7 @@ npm run test:e2e
 
 ## 版本与发布边界
 
-当前源码和最新发布版本为 `2.6.5`。本 README 不承诺未完成的能力，包括代码签名、应用内自动更新、完整 Windows 10/11 干净机安装矩阵、云同步和跨平台客户端。
+当前源码和最新公开发布版本为 `2.6.15`。本轮包含桌面端前后端优化、日志与日反馈来源隔离、生成缓存与强制重生成、Agent 视口与交互可达性修正，以及 Windows Squirrel 安装包重新构建。README 不承诺未完成的能力，包括代码签名、应用内自动更新、完整 Windows 10/11 干净机安装矩阵、云同步和跨平台客户端。
 
 ## 许可证
 

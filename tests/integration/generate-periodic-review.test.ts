@@ -101,4 +101,27 @@ describe('GeneratePeriodicReview', () => {
     await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(save).not.toHaveBeenCalled();
   });
+
+  it('returns safe structured diagnostics without consuming the preview, then allows a confirmed retry', async () => {
+    const save = vi.fn(async (review: unknown) => review);
+    const collectStructured = vi.fn()
+      .mockResolvedValueOnce({ content: '', finishReason: 'length' })
+      .mockResolvedValueOnce({ content: '', finishReason: 'stop' })
+      .mockResolvedValueOnce({ content: validModelOutput, finishReason: 'stop' });
+    const service = new GeneratePeriodicReview(
+      { list: async () => [journal] } as never,
+      { list: async () => [], save } as never,
+      { collect: vi.fn(), collectStructured } as never,
+      { start: () => ({ taskId: 'x', controller: new AbortController(), phase: 'queued' }), transition: () => undefined } as never,
+      () => '2026-08-13T10:00:00.000Z',
+    );
+    const input = { type: 'project' as const, start: '2026-08-01', end: '2026-08-31', projectId: 'project_a1', model: 'fake' };
+    const preview = await service.preview(input);
+    const failed = await service.execute({ ...input, previewToken: preview.token });
+    expect(failed).toMatchObject({ kind: 'error', diagnostics: { kind: 'empty_content', finishReason: 'stop', outputLength: 0, retryOf: 'truncated', maxTokens: 3600 } });
+    expect(save).not.toHaveBeenCalled();
+    const retried = await service.execute({ ...input, previewToken: preview.token });
+    expect(retried.kind).toBe('review');
+    expect(save).toHaveBeenCalledOnce();
+  });
 });

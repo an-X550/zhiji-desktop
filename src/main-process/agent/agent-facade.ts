@@ -6,6 +6,7 @@ import type { AgentEvent, AgentMessage, AgentSession } from '../../shared/schema
 import type { AgentModelRequest, AgentRuntimeResponse, AgentUtilityCommand, AgentUtilityEvent } from '../../shared/schemas/agent-protocol';
 import type { AgentModelTransport } from './agent-model-transport';
 import type { AgentToolDispatcher } from './agent-tool-dispatcher';
+import type { MaintenanceCoordinator } from '../infrastructure/lifecycle/maintenance-coordinator';
 
 export interface AgentRuntimePort {
   start(): Promise<void>;
@@ -14,6 +15,7 @@ export interface AgentRuntimePort {
   onEvent(listener: (event: AgentUtilityEvent) => void): () => void;
   onExit(listener: () => void): () => void;
   stop(): Promise<void>;
+  stopForMaintenance(): Promise<void>;
 }
 
 export interface AgentSessionDeletionOptions {
@@ -29,13 +31,17 @@ export class AgentFacade {
   private readonly unsubscribeExit: () => void;
   private startup: Promise<void> | undefined;
 
-  constructor(private readonly runtime: AgentRuntimePort, private readonly modelTransport: AgentModelTransport, private readonly toolDispatcher?: AgentToolDispatcher, private readonly deletionOptions: AgentSessionDeletionOptions = {}) {
+  constructor(private readonly runtime: AgentRuntimePort, private readonly modelTransport: AgentModelTransport, private readonly toolDispatcher?: AgentToolDispatcher, private readonly deletionOptions: AgentSessionDeletionOptions = {}, private readonly maintenance?: MaintenanceCoordinator) {
     this.unsubscribeRuntime = runtime.onEvent((event) => this.handleRuntimeEvent(event));
     this.unsubscribeExit = runtime.onExit(() => this.handleRuntimeExit());
   }
 
   async start(title?: string): Promise<AgentSession> {
-    await this.ensureStarted();
+    return this.maintenance?.runWrite(() => this.startUnlocked(title)) ?? this.startUnlocked(title);
+  }
+
+  private async startUnlocked(title?: string): Promise<AgentSession> {
+    await this.ensureStartedInternal();
     const now = new Date().toISOString();
     const session: AgentSession = { id: `agent_${randomUUID().replaceAll('-', '')}`, title: title?.trim() || '新对话', status: 'idle', messages: [], createdAt: now, updatedAt: now };
     await this.runtime.request({ type: 'session.start', requestId: randomUUID(), sessionId: session.id });
@@ -45,7 +51,11 @@ export class AgentFacade {
   }
 
   async send(sessionId: string, message: string): Promise<void> {
-    await this.ensureStarted();
+    return this.maintenance?.runWrite(() => this.sendUnlocked(sessionId, message)) ?? this.sendUnlocked(sessionId, message);
+  }
+
+  private async sendUnlocked(sessionId: string, message: string): Promise<void> {
+    await this.ensureStartedInternal();
     const session = this.requireSession(sessionId);
     const now = new Date().toISOString();
     const userMessage: AgentMessage = { id: randomUUID(), role: 'user', content: message, at: now };
@@ -59,13 +69,23 @@ export class AgentFacade {
   }
 
   async cancel(sessionId: string): Promise<void> {
-    await this.ensureStarted();
-    this.requireSession(sessionId);
-    await this.runtime.request({ type: 'session.cancel', requestId: randomUUID(), sessionId });
+    await (this.maintenance?.runWrite(async () => {
+      await this.ensureStartedInternal();
+      this.requireSession(sessionId);
+      await this.runtime.request({ type: 'session.cancel', requestId: randomUUID(), sessionId });
+    }) ?? (async () => {
+      await this.ensureStartedInternal();
+      this.requireSession(sessionId);
+      await this.runtime.request({ type: 'session.cancel', requestId: randomUUID(), sessionId });
+    })());
   }
 
   async delete(sessionId: string): Promise<void> {
-    await this.ensureStarted();
+    return this.maintenance?.runWrite(() => this.deleteUnlocked(sessionId)) ?? this.deleteUnlocked(sessionId);
+  }
+
+  private async deleteUnlocked(sessionId: string): Promise<void> {
+    await this.ensureStartedInternal();
     const session = this.requireSession(sessionId);
     if (session.status === 'running') throw appError({ code: 'INVALID_INPUT', message: '当前 Agent 正在运行，请先停止后再删除。' });
     await this.runtime.request({ type: 'session.delete', requestId: randomUUID(), sessionId });
@@ -73,19 +93,45 @@ export class AgentFacade {
     this.sessions.delete(sessionId);
   }
 
+  assertCanMaintain(): void {
+    if ([...this.sessions.values()].some((session) => session.status === 'running')) {
+      throw appError({ code: 'INVALID_INPUT', message: '当前 Agent 仍在处理，请先完成或正常取消后再维护数据。' });
+    }
+  }
+
+  async pauseForMaintenance(): Promise<void> {
+    // 已入场的 send 可能在排空期间变为 running，停机前再次核查。
+    this.assertCanMaintain();
+    await this.runtime.stopForMaintenance();
+    this.startup = undefined;
+  }
+
+  async resumeAfterMaintenance(): Promise<void> {
+    this.startup = undefined;
+    if (this.sessions.size > 0) await this.ensureStartedInternal();
+  }
+
   async confirm(sessionId: string, approvalId: string): Promise<void> {
-    await this.ensureStarted();
-    const session = this.requireSession(sessionId);
-    if (session.status === 'running') throw appError({ code: 'INVALID_INPUT', message: '当前 Agent 仍在处理，请稍后再确认。' });
-    if (!this.toolDispatcher?.approve(sessionId, approvalId)) throw appError({ code: 'INVALID_INPUT', message: '确认已失效，请重新预览材料。' });
-    try { await this.send(sessionId, '我已在知己 Agent 页面确认执行刚才预览的正式工作流。'); }
-    catch (error) { this.toolDispatcher.revoke(sessionId, approvalId); throw error; }
+    const confirmUnlocked = async () => {
+      await this.ensureStartedInternal();
+      const session = this.requireSession(sessionId);
+      if (session.status === 'running') throw appError({ code: 'INVALID_INPUT', message: '当前 Agent 仍在处理，请稍后再确认。' });
+      if (!this.toolDispatcher?.approve(sessionId, approvalId)) throw appError({ code: 'INVALID_INPUT', message: '确认已失效，请重新预览材料。' });
+      try { await this.sendUnlocked(sessionId, '我已在知己 Agent 页面确认执行刚才预览的正式工作流。'); }
+      catch (error) { this.toolDispatcher.revoke(sessionId, approvalId); throw error; }
+    };
+    return this.maintenance?.runWrite(confirmUnlocked) ?? confirmUnlocked();
   }
 
   async list(): Promise<AgentSession[]> {
-    await this.ensureStarted();
+    if (!this.maintenance) return this.listUnlocked();
+    return this.maintenance.runRead(() => this.listUnlocked(), () => this.sortedSessions());
+  }
+
+  private async listUnlocked(): Promise<AgentSession[]> {
+    await this.ensureStartedInternal();
     await this.runtime.request({ type: 'session.list', requestId: randomUUID() });
-    return [...this.sessions.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return this.sortedSessions();
   }
 
   get(sessionId: string): AgentSession {
@@ -106,7 +152,7 @@ export class AgentFacade {
     await this.runtime.stop();
   }
 
-  private async ensureStarted(): Promise<void> {
+  private async ensureStartedInternal(): Promise<void> {
     this.startup ??= this.runtime.start();
     try { await this.startup; }
     catch (error) { this.startup = undefined; throw error; }
@@ -147,6 +193,19 @@ export class AgentFacade {
   }
 
   private async dispatchTool(event: Extract<AgentUtilityEvent, { type: 'tool.request' }>): Promise<void> {
+    const operation = () => this.dispatchToolUnlocked(event);
+    try {
+      await (this.maintenance?.runWrite(operation) ?? operation());
+    } catch (error) {
+      this.runtime.send({ type: 'tool.result', requestId: event.requestId, result: { kind: 'error', code: 'INVALID_INPUT', message: error instanceof Error ? error.message : '数据维护进行中，请稍后重试。', retryable: false } });
+    }
+  }
+
+  private sortedSessions(): AgentSession[] {
+    return [...this.sessions.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  private async dispatchToolUnlocked(event: Extract<AgentUtilityEvent, { type: 'tool.request' }>): Promise<void> {
     if (!this.sessions.has(event.sessionId)) { this.runtime.send({ type: 'tool.result', requestId: event.requestId, result: { kind: 'error', code: 'INVALID_INPUT', message: '知己 Agent 会话不存在，已拒绝工具调用。', retryable: false } }); return; }
     const controller = new AbortController();
     this.toolControllers.set(event.requestId, controller);

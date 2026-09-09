@@ -30,9 +30,50 @@ describe('ReviewsPage', () => {
   });
 
   it('shows a history action after successful generation', async () => {
-    render(<ReviewsPage projects={[]}/>); fireEvent.click(screen.getByRole('button', { name: '预览本周材料' })); fireEvent.click(screen.getByRole('button', { name: '预览材料' })); await screen.findByText('真实材料'); fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+    const refresh = vi.fn(async () => undefined);
+    render(<ReviewsPage projects={[]} onRefresh={refresh}/>); fireEvent.click(screen.getByRole('button', { name: '预览本周材料' })); fireEvent.click(screen.getByRole('button', { name: '预览材料' })); await screen.findByText('真实材料'); fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '查看历史复盘' })).toBeInTheDocument()); fireEvent.click(screen.getByRole('button', { name: '查看历史复盘' })); expect(screen.getByRole('heading', { name: '历史复盘' })).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledOnce();
     expect(within(document.querySelector('.history-reader .markdown-document') as HTMLElement).getByText('本周有效行动')).toBeInTheDocument();
+  });
+
+  it('keeps a saved result successful when refreshing the shared review list fails', async () => {
+    const refresh = vi.fn(async () => { throw new Error('列表暂不可用'); });
+    render(<ReviewsPage projects={[]} onRefresh={refresh}/>);
+    fireEvent.click(screen.getByRole('button', { name: '预览本周材料' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览材料' }));
+    await screen.findByText('真实材料');
+    fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+    expect(await screen.findByText('复盘已保存到本机，但历史列表刷新失败；稍后可重新读取。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看历史复盘' })).toBeInTheDocument();
+  });
+
+  it('shows safe structured diagnostics for periodic failure and keeps the confirmed materials available for retry', async () => {
+    const diagnostics = { kind: 'truncated' as const, finishReason: 'length', outputLength: 0, schemaPaths: [], at: new Date().toISOString(), maxTokens: 3600, attempt: 2 };
+    vi.mocked(window.zhiji.reviews.generatePeriodic)
+      .mockResolvedValueOnce({ kind: 'error', message: 'AI 这次没有返回可用的反馈，日志和已有数据没有受到影响。', diagnostics })
+      .mockResolvedValueOnce({ kind: 'review', review: { schemaVersion: 1, id: 'review_retry', type: 'weekly', periodStart: '2026-08-10', periodEnd: '2026-08-16', sourceIds: ['journal_a1'], projectId: null, provider: 'openai-compatible', model: 'test', promptVersion: 'weekly-review-v1', createdAt: '2026-08-13T00:00:00.000Z', body: '重试成功' } });
+    render(<ReviewsPage projects={[]}/>);
+    fireEvent.click(screen.getByRole('button', { name: '预览本周材料' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览材料' }));
+    await screen.findByText('真实材料');
+    fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+    expect(await screen.findByText('AI 这次没有返回可用的反馈，日志和已有数据没有受到影响。')).toBeInTheDocument();
+    expect(screen.getByText('输出被截断')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+    expect(await screen.findByText('重试成功')).toBeInTheDocument();
+    expect(window.zhiji.reviews.generatePeriodic).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes the Electron IPC wrapper from a periodic provider error', async () => {
+    vi.mocked(window.zhiji.reviews.generatePeriodic).mockRejectedValueOnce(new Error("Error invoking remote method 'reviews:generate-periodic': 网络请求失败或超时，请稍后重试。"));
+    render(<ReviewsPage projects={[]}/>);
+    fireEvent.click(screen.getByRole('button', { name: '预览本周材料' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览材料' }));
+    await screen.findByText('真实材料');
+    fireEvent.click(screen.getByRole('button', { name: '确认并生成' }));
+    expect(await screen.findByText('生成失败：网络请求失败或超时，请稍后重试。')).toBeInTheDocument();
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
   });
 
   it('applies weekly and project navigation intents and keeps review history in this page', () => {

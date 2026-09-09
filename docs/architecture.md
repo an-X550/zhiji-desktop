@@ -1,6 +1,6 @@
 # 知己桌面端架构与逻辑文档（AI 修改与优化指南）
 
-> 更新日期：2026-08-21
+> 更新日期：2026-09-08
 >
 > 读者：需要修改或优化 `apps/zhiji-desktop/` 的 AI 代理与开发者
 >
@@ -31,19 +31,20 @@
 | 打包 | electron-forge ^7.11 + Vite 插件 + Squirrel maker | Windows x64 安装包；fuses 插件启用 |
 | 前端 | React ^19 + TypeScript ^5.9 | 无路由库、无状态库，纯 useState/useEffect |
 | 校验 | zod ^4 | 域模型、IPC 入参、模型输出三层都用 |
-| AI 编排 | @langchain/langgraph ^1.4 | 仅用于日反馈/周期复盘的 StateGraph |
+| AI 编排 | 显式 async runtime + Zod + `collectValidated` | 日反馈/周期复盘保留证据分级、质量门、取消与单次结构化重试 |
 | Agent 编排 | DeepSeek Harness `0.1.0-rc.8` + Cordis `4.0.1` | 仅在独立 Utility Process 中运行会话 loop；现有领域能力仍由 Main Process 服务实现 |
 | Markdown | gray-matter ^4 | frontmatter 序列化 |
 | 压缩 | adm-zip | 备份导出/恢复 |
-| 测试 | vitest ^2 + @testing-library/react + playwright | unit + integration + e2e |
+| 测试 | vitest ^2 + @testing-library/react + playwright | unit + integration + e2e；另有 `benchmark:memory` 离线基准 |
 
 命令（在 `apps/zhiji-desktop/` 下）：
 
 ```text
 npm start          开发运行
-npm test           vitest run（当前 51 文件 / 289 测试，2026-08-21 实测）
+npm test           vitest run（当前 60 文件 / 383 测试，2026-09-08 实测）
 npm run typecheck  tsc --noEmit
 npm run lint       eslint（发布门要求 0 error）
+npm run benchmark:memory  100/1,000/5,000 条合成中文检索冷/热基准
 npm run package    electron-forge package（E2E 前置与发布门）
 npm run test:e2e   playwright（先自动 package）
 ```
@@ -78,7 +79,7 @@ npm run test:e2e   playwright（先自动 package）
 - 凭证只进 `userData/credentials.json`（safeStorage 加密、0o600），不进数据目录、不进备份包。
 - 个人背景仅在 `profile.enabledForAi === true` 时注入 AI 请求。
 - 前端渲染 AI/日志内容必须走 `MarkdownDocument` 安全子集渲染器，禁止 `dangerouslySetInnerHTML`。
-- 已知待补（2026-08-13 审计记录）：IPC 尚未校验 event.sender；修改 IPC 时可顺手评估，但不要无证据扩张。
+- `ipc-source-guard.ts`：所有业务 handler 统一校验已登记窗口、顶层 frame 和精确开发/生产页面；`main.ts` 同时限制导航与第二实例聚焦。
 
 ## 4. 源码目录总览
 
@@ -100,10 +101,10 @@ src/
 │   ├── window-options.ts          窗口与安全配置
 │   ├── application/               用例层（每个文件一个用例类）
 │   ├── domain/                    纯领域逻辑（无 Electron/fs 依赖）
-│   ├── skill-runtime/             LangGraph 运行时 + 证据分级 + 审计 + 兼容快照
+│   ├── skill-runtime/             显式 async 运行时 + 结构化输出校验 + 证据分级 + 审计
 │   ├── prompts/                   版本化提示词 + zod 输出解析 + 确定性渲染
 │   ├── infrastructure/            存储仓储、AI 适配器、凭证、备份、联网、数据目录
-│   └── ipc/register-handlers.ts   IPC 注册（入参校验 + 委托）
+│   └── ipc/                       IPC 注册、来源校验与委托
 └── renderer/
     ├── app/                       App / AppShell / navigation 模型
     ├── pages/                     六个一级页面（含知己 Agent；其余五页职责不变）
@@ -189,7 +190,7 @@ NavigationTarget = { view, intent? }
 
 ### 7.1 组合根
 
-`bootstrap.ts` 手工装配（无 DI 容器）：数据根 `process.env.ZHIJI_DATA_ROOT ?? Documents/知己`；按“仓储 → 凭证 → AI 配置 → 任务管理 → 生成服务 → 领域服务 → 传输/目录服务”顺序构造，最后整体注入 `registerHandlers`。阶段 A 额外装配 `AgentFacade`：它启动独立 Utility Process 中的最小 DSH loop，并通过 `AgentModelTransport` 调用 `ConfigureAi.streamAgent()`；密钥仅在 Main Process 内解密和使用。阶段 B/C 的 `AgentToolDispatcher` 只允许经既有服务读取摘要、受控搜索/读源，或调用高层日志/反馈/复盘用例；周期与洞察复盘的确认状态由 Main Process 持有，不能由模型文本冒充。新增服务的装配只改这一个文件。
+`bootstrap.ts` 手工装配（无 DI 容器）：数据根 `process.env.ZHIJI_DATA_ROOT ?? Documents/知己`；按“仓储 → 凭证 → AI 配置 → 任务管理 → 生成服务 → 领域服务 → 传输/目录服务”顺序构造，最后整体注入 `registerHandlers`。`MaintenanceCoordinator` 统一包住 IPC 与 Agent 工具在途操作，迁移/导出/恢复先排空写入并按需要停止 Utility；数据根切换成功后应用保持只读，要求重启后重新装配。正常 Agent `list` 作为在途读取计数，维护中的 `list` 返回 Main Process 已有快照，不启动或请求 Utility；`start`、`send`、`delete`、`confirm` 等写入口在维护态入场前拒绝。阶段 A 额外装配 `AgentFacade`：它启动独立 Utility Process 中的最小 DSH loop，并通过 `AgentModelTransport` 调用 `ConfigureAi.streamAgent()`；密钥仅在 Main Process 内解密和使用。阶段 B/C 的 `AgentToolDispatcher` 只允许经既有服务读取摘要、受控搜索/读源，或调用高层日志/反馈/复盘用例；周期与洞察复盘的确认状态由 Main Process 持有，不能由模型文本冒充。新增服务的装配只改这一个文件。
 
 ### 7.2 application 层（用例）
 
@@ -214,8 +215,9 @@ NavigationTarget = { view, intent? }
 设计原则：证据分级与降级由代码强制，不信任提示词自觉。
 
 - `daily-evidence.ts`：中文关键词正则把日志分句归入 facts/states/interpretations/intentions，输出 A-D 等级与 gaps。A=四类齐全；B=事实+（状态或解释）；C=仅片段但有本人经历；D=无法确认本人经历。**已知风险**：正则实现与 Skill 侧语义判级可能分歧（见契约审计 R2）。
-- `daily-runtime.ts`：LangGraph StateGraph 三节点——`build_evidence →（D 级?clarify:generate）→ END`。D 级不调模型、不保存，直接返回补证问题。生成节点按等级注入 `gradeInstruction`；C 级在代码层强制 `patternConnection = null`；模型输出经 `parseDailyReviewOutput` 严格解析，失败抛 `INVALID_MODEL_OUTPUT`。
-- `periodic-evidence.ts` / `periodic-runtime.ts` / `periodic-materials.ts`：周期版同构。证据等级按材料数量判定（如 weekly：无日志且无日反馈=D；无日反馈=C；日反馈<3 或日志<3=B；否则 A）。材料按"下游沉淀优先"组装为 `{ primary, supplement, journalIndex }`：周复盘主材料是日反馈，月复盘主材料是周复盘；下游沉淀 <3 条才补日志全文，否则只给日志索引。
+- `daily-runtime.ts`：显式 async 分支——先做 A-D 证据分级，D 级追加至多一次 `confirmPersonalExperience` 短复核，仍为 D 才返回补证问题；A/B/C 通过 `collectValidated` 走 1200 token 的结构化生成，C 级在代码层强制 `patternConnection = null`。
+- `periodic-evidence.ts` / `periodic-runtime.ts` / `periodic-materials.ts`：周期版同构。证据等级按材料数量判定（如 weekly：无日志且无日反馈=D；无日反馈=C；日反馈<3 或日志<3=B；否则 A）。材料按"下游沉淀优先"组装为 `{ primary, supplement, journalIndex }`：周复盘主材料是日反馈，月复盘主材料是周复盘；下游沉淀 <3 条才补日志全文，否则只给日志索引。周期结构化预算为 weekly/project 1800、monthly 2400，`collectValidated` 对空、截断、非法 JSON 或 Schema 错误最多重试一次。
+- `collect-validated.ts`：统一结构化响应诊断（失败类别、finish reason、长度、Schema 路径、时间）与单次重试；网络、认证和取消不重试，诊断不保存模型原文。
 - `daily-audit-recorder.ts`：JSONL 仅追加审计（日期、来源 id、证据等级、结果、上一行动状态），不做长期模式沉淀。
 - `compatibility/`：`daily-feedback-v1.ts`、`periodic-review-v1.ts` 冻结兼容快照常量，声明桌面端对齐的规则版本；与仓库根契约审计文档联动阅读。
 
@@ -238,10 +240,10 @@ NavigationTarget = { view, intent? }
 Markdown 仓储（`infrastructure/markdown/`）统一模式：
 
 - 序列化：gray-matter frontmatter + 正文；回读经 zod schema 校验。
-- `atomic-write.ts`：写临时文件 → 复读校验（validate 回调）→ 旧文件备份 → rename 上位 → 删备份；失败自动回滚。所有落盘必须用它。
+- `atomic-write.ts`：写入同目录校验临时文件并复读，再交给 `write-file-atomic@6.0.0` 完成 fsync/替换；失败不先移走正式文件。所有落盘必须用它。
 - `path-policy.ts`：`resolveInsideRoot` 防路径穿越；中文目录名是现实约束（仓库已知问题），新代码保持兼容。
-- `journal-repository.ts`：`journals/YYYY/*.md`；写操作经 `updateQueue` Promise 链串行；重复 id 抛 `FILE_CONFLICT`；删除走 `shell.trashItem`。
-- `review-repository.ts` / `profile-repository.ts`（`profile/about-me.md`）/ `project-repository.ts`（JSON，项目名全局唯一）同模式。
+- `journal-repository.ts`：`journals/YYYY/*.md`；create/update/delete 共用 Promise 队列，更新日期只改 frontmatter、不搬文件；启动阶段只恢复唯一合法 `.bak`/`.moving` 候选，冲突与歧义保留并告警；重复 id 抛 `FILE_CONFLICT`；删除走 `shell.trashItem`。
+- `review-repository.ts` / `profile-repository.ts`（`profile/about-me.md`）/ `project-repository.ts`（JSON，项目名全局唯一）同模式；日志/复盘仓储提供元数据核对的 `searchEntries`，供检索索引增量复用。
 
 其他基础设施：
 
@@ -249,8 +251,12 @@ Markdown 仓储（`infrastructure/markdown/`）统一模式：
 - `ai/provider-config.ts`：三预设（openai/deepseek/custom）+ HTTPS 校验（开发环境可放行 loopback HTTP）；DeepSeek 默认 `deepseek-v4-flash`，旧模型名由配置服务迁移。
 - `credentials/credential-store.ts`：safeStorage 加密，`userData/credentials.json`，加密不可用时明确报错不降级明文；旧密钥环导致密文无法解密时保留文件并按“未配置 API Key”恢复设置页。
 - `data-directory/data-directory-service.ts`：数据目录信息（路径、可写性、文件数、字节数、分类计数）与打开。
+- `data-directory/data-root-holder.ts` + `lifecycle/maintenance-coordinator.ts`：迁移/恢复/导出先同步检查 running 会话，忙碌时不进入 draining，保留用户取消能力；通过后排空所有 Main 与 Agent 写入；`AgentFacade` 在严格维护停机前再次检查 session.status，存在 running 回合则拒绝维护，让用户完成或正常取消。`ElectronAgentRuntime.stopForMaintenance()` 不复用会隐式启动的 request：先确认同一 child 的 `runtime.shutdown` `command.completed`，再核对 `kill()` 与真实 `exit`；shutdown 失败、超时、`kill=false` 或无 exit 均不进入复制/恢复，`error` 不冒充 `exit`，旧 child 迟到事件不清理新实例。逐项复制并验证文件集/大小后原子更新配置，成功进入只读等待重启，失败经明确内部恢复路径恢复原路径能力。
 - `transfer/data-transfer-service.ts` + `archive-manifest.ts` + `business-archive-validator.ts`：导出 `.zhiji.zip`（manifest 含 formatVersion/appVersion/逐文件 sha256）；恢复两段式——preview 校验（路径白名单、哈希、业务 schema）返回 previewId，restore 只允许写入空数据目录；API Key 与缓存不入包。
 - `agent/dsh-runtime.ts` + `@deepseek-ai/dsh-session-persistence-jsonl`：Agent 事件日志写入数据根 `agent/sessions/`；Main 负责路径、恢复列表和安全投影，Utility 负责 DSH session loop，不把领域正文复制进会话。
+- `agent/agent-memory-search-service.ts` + `markdown/search-entries.ts`：MiniSearch 内存索引按文件 `size/mtimeMs/ctimeMs` 增量刷新；写入、恢复和数据根切换主动失效，来源内或跨来源重复 ID 在索引变更前以 `FILE_CONFLICT` 拒绝，损坏文件不被跳过，索引不进入备份权威数据。真实 get、预览和生成仍读取权威文件。
+- `ipc/ipc-source-guard.ts`：统一登记 BrowserWindow、校验顶层 frame 与精确页面来源；生产只接受精确 `file://` 入口，开发只接受实际 Vite origin/path。
+- `ai/openai-compatible-provider.ts`：结构化请求使用非流式 `response_format: json_object`，保留 `finish_reason` 和可选 input/output/cached usage；不支持的字段为 `null`。
 - `patterns/verified-pattern-repository.ts`：单一 JSON 快照，原子写 + zod 复读；损坏报错。
 - `web/tavily-web-search-provider.ts` + `web/web-search-service.ts`：受控联网。官方 `@tavily/core@0.7.7` 走 keyless `search/extract`；搜索最多保存 8 条 HTTPS/HTTP 公开来源及域名、时间和有限正文，结果绑定 `search_` 会话；`readSource` 只接受本会话返回过的 `sourceId`，正文最多 2000 字，不向 Agent 暴露任意 URL。Provider 错误在 Main Process 收敛为不可用、超时、共享限额、空结果或来源不可读。
 
@@ -288,11 +294,11 @@ TodayPage.generate → 先保存草稿（若有）→ reviews:generate-daily
 → GenerateDailyReview：当日日志为空抛 NOT_FOUND
 → 快路径：已有 v2 反馈且 sourceVersions 一致且非 regenerate → 返回缓存
 → ReviewTaskManager.start（并发则 TASK_ALREADY_RUNNING）
-→ runDailyFeedback（LangGraph）：
+→ runDailyFeedback（显式 async）：
     build_evidence（正则分级）
-    ├─ D 级 → clarify：返回补证问题，不调模型，不保存
+    ├─ D 级 → confirmPersonalExperience（至多一次短复核）→ 仍为 D：返回补证问题，不保存
     └─ A/B/C → 组上下文（当日日志+前次反馈+可选 profile）
-       → provider.collect(jsonObject) → parseDailyReviewOutput（失败 INVALID_MODEL_OUTPUT）
+       → collectValidated（1200 token，结构失败至多重试一次）→ parseDailyReviewOutput
        → C 级强制 patternConnection=null → renderDailyReview
 → 保存 Review v2 → DailyAuditRecorder 记录 → completed
 ```
@@ -309,6 +315,7 @@ reviews:generate-periodic（带 previewToken）
 → 重算材料 digest ≠ 预览 digest → “材料已变化，请重新预览”
 → runPeriodicFeedback（build_evidence → D?clarify : generate）
     generate：periodicSystemPrompt(type, grade) + {materials: 下游沉淀优先结构, evidence, profile?}
+    → collectValidated（weekly/project 1800；monthly 2400，结构失败至多重试一次）→ 六问 Schema → 质量门 → 确定性渲染
 → 保存 Review v1
 ```
 
@@ -329,6 +336,8 @@ DSH tool.request
 ```
 
 `tool.cancel` 沿 MessagePort 反向传播为 Main Process 的 `AbortSignal`，再连接 `ReviewTaskManager`；取消发生在保存前时不会生成半写入正式复盘。确认状态只存在于 Main Process 的短期内存中，过期或进程退出后必须重新预览。
+
+所有 Agent `tool.request` 也计入 `MaintenanceCoordinator` 的在途操作；数据迁移、导出或恢复先拒绝 running 回合，通过后等待已入场工具返回、再次核查回合状态，再请求 Utility shutdown，避免会话工具在复制期间继续写入。`session.send` 的命令完成只代表 DSH 接收 followup，不代表模型回合完成；本地 session 状态仍为 `running` 时，维护在严格停机前拒绝且不调用 stop/copy。维护及重启等待期间，`list/get` 只读 Main Process 快照；复制失败时使用内部恢复路径，成功迁移则保持只读并要求重启。
 
 ### 9.3.1 Agent 会话持久化与数据生命周期（阶段 D1）
 
@@ -373,7 +382,7 @@ patterns:confirm（候选）→ 生成 pattern_ id → 快照 add（原子写 + 
 | RATE_LIMITED | 429 | 限流 |
 | NETWORK_TIMEOUT | 网络失败/中断 | fetch 失败或 abort |
 | INVALID_MODEL_OUTPUT | 模型输出不合 schema | JSON 解析或字段校验失败 |
-| FILE_CONFLICT | 重复 id/并发冲突 | 仓储读到重复 id |
+| FILE_CONFLICT | 重复 id/并发冲突 | 仓储或检索索引读到重复 id |
 | DATA_CORRUPTED | 本地数据损坏 | 快照/索引复读校验失败 |
 | IMPORT_REJECTED | 备份校验拒绝 | manifest/哈希/路径/业务 schema 不合格 |
 | TASK_ALREADY_RUNNING | 已有进行中的生成任务 | ReviewTaskManager 并发拦截 |
@@ -434,7 +443,7 @@ Agent 工具错误统一返回 `code/message/retryable/retryAfterSeconds?`；普
 1. ~~**未使用依赖**~~：已于 2026-08-14 清理（移除五个未使用依赖与 react-query 死接线，lock 文件同步）。
 2. ~~**跨端重复的新鲜度逻辑**~~：已于 2026-08-14 抽至 `shared/domain/daily-freshness.ts`，双端对照单测见 `daily-freshness.test.ts`。
 3. **预览 Map 无回收**：`GeneratePeriodicReview`、`GenerateInsightReview` 的 previews 只在成功 execute 时删除；放弃的 token 常驻内存至进程退出。单用户场景影响小，但加 TTL 或上限是低成本加固。
-4. **IPC 无 sender 校验**：2026-08-13 审计遗留项；当前单窗口场景风险低，做之前评估成本收益。
+4. ~~**IPC 无 sender 校验**~~：已于 2026-09-08 由 `IpcSourceGuard` 统一校验已登记窗口、顶层 frame 和精确页面来源；真实 Electron 页面仍需随打包 E2E 复验。
 5. **日反馈长度仅软约束**：提示词写 320 字但 zod 字段上限宽松且无渲染期校验；出现真实超长样本再加硬校验。
 6. **MarkdownDocument 无内联格式**：加粗/链接/行内代码不渲染；扩展须在安全渲染器内实现。
 7. **register-handlers.ts 单文件承载 ~45 个 handler** 且含少量业务判断（项目删除前关联检查、备份对话框流程）；按域拆分可提升可维护性，属重构而非缺陷。
@@ -443,4 +452,8 @@ Agent 工具错误统一返回 `code/message/retryable/retryAfterSeconds?`；普
 
 ## 15. 性能与扩展性现状
 
-数据规模假设：单用户、数千篇日志以内。所有列表操作是全量读文件后内存过滤（`journals.list()` 每次 readdir+parse 全部文件），写操作串行。在该规模下无性能问题；若未来数据增长，优先优化仓储缓存层，而不是引入数据库——本地 Markdown 权威是产品承诺，不能为性能牺牲。
+数据规模假设：单用户、数千篇日志以内。日志/复盘的 Agent 检索使用元数据核对 + MiniSearch 增量内存索引，权威 Markdown 仍不变；真实 get、预览和生成仍全量复读目标材料。`npm run benchmark:memory` 在 2026-09-08 用同一合成数据和模拟源运行 5 次查询：冷路径是每次重建索引的五次合计，热路径包含首次建索引后四次查询的五次合计；100 条冷/热约 106.72/30.06ms、1,000 条约 781.32/310.07ms、5,000 条约 3,169.24/1,293.32ms。这里的热值不是一次磁盘热查询，解析计数同样是五次合计（冷 500/5,000/25,000，热 100/1,000/5,000）。5,000 条热查询期间观测到约 198.18ms 最大事件循环延迟，说明仍有主进程同步索引工作，但本轮不引入 Worker；后续若真实数据规模或卡顿证据超过该边界，再评估 Worker。该基准是本地实现前后的冷/热对照，不是历史版本发布承诺。
+
+### 维护等待边界（v2.6.8）
+
+Utility 从创建到 ready 默认最多等待 10 秒，启动超时会释放列表与维护排空等待。超时实例保留跟踪至真实 exit，迟到 ready 不会重新启用它，也不会创建第二个进程。维护入场前同步检查 running，排空后再次检查，避免等待工具时阻止正常取消。实现复用现有定时器/Promise 与协调器，没有新增依赖。

@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react';
 import type { SaveProviderConfigInput } from '../../shared/schemas/ipc';
+import { isStructuredOutputError, type StructuredOutputDiagnostics } from '../../shared/errors/app-error';
+import type { AiConnectionTestResult } from '../../shared/schemas/domain';
 import type { SettingsSection } from '../app/navigation';
 import { Button } from '../components/button';
 import { ConfirmDialog } from '../components/confirm-dialog';
 import { Field } from '../components/field';
 import { PageHeader } from '../components/page-header';
 import { StatusBanner } from '../components/status-banner';
+import { StructuredDiagnostics } from '../components/structured-diagnostics';
+import { AiConnectionDiagnostics } from '../components/ai-connection-diagnostics';
 import { applyThemePreference, getThemePreference, type ThemePreference } from '../utils/theme';
 
 const presets = {
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5-mini' },
   deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash' },
 } as const;
+const SETTINGS_TABS = [['general', '通用'], ['ai', 'AI 与个性化'], ['data', '数据与隐私']] as const;
 
 type DataInfo = Awaited<ReturnType<Window['zhiji']['dataDirectory']['getInfo']>>;
 type RestorePreview = Awaited<ReturnType<Window['zhiji']['transfer']['previewRestore']>>;
@@ -23,6 +28,8 @@ export function SettingsPage({ initialSection = 'general', onSaved }: { initialS
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'save' | 'test' | null>(null);
+  const [connectionResult, setConnectionResult] = useState<AiConnectionTestResult | null>(null);
+  const [connectionFailure, setConnectionFailure] = useState<StructuredOutputDiagnostics | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
   const [profile, setProfile] = useState({ body: '', enabledForAi: false });
@@ -51,23 +58,32 @@ export function SettingsPage({ initialSection = 'general', onSaved }: { initialS
 
   const changeTheme = (next: ThemePreference) => { setTheme(next); applyThemePreference(next); };
   const updateProvider = (providerId: SaveProviderConfigInput['providerId']) => {
-    setMessage(''); setError('');
+    setMessage(''); setError(''); setConnectionResult(null); setConnectionFailure(null);
     setForm((old) => ({ ...old, providerId, agentThinking: providerId === 'deepseek' ? old.agentThinking : 'disabled', ...(providerId === 'custom' ? {} : presets[providerId]) }));
   };
+  const clearConnectionResult = () => { setConnectionResult(null); setConnectionFailure(null); setMessage(''); setError(''); };
   const runProvider = async (kind: 'save' | 'test') => {
     setBusy(kind); setMessage(''); setError('');
     try {
-      if (kind === 'test') await window.zhiji.settings.testConnection(form);
-      const result = await window.zhiji.settings.save(form);
-      setHasApiKey(result.hasApiKey); await onSaved?.();
+      let tested: AiConnectionTestResult | null = null;
+      if (kind === 'test') {
+        tested = await window.zhiji.settings.testConnection(form);
+        setConnectionResult(tested);
+        setConnectionFailure(null);
+      }
+      const saved = await window.zhiji.settings.save(form);
+      setHasApiKey(saved.hasApiKey); await onSaved?.();
       setForm((current) => ({ providerId: current.providerId, baseUrl: current.baseUrl, model: current.model, agentThinking: current.agentThinking }));
-      setMessage(kind === 'test' ? '连接成功，设置已安全保存' : '设置已安全保存');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '请检查配置后重试'); }
+      setMessage(kind === 'test' ? `连接成功，结构化响应有效${tested?.usage?.outputTokens !== null && tested?.usage?.outputTokens !== undefined ? `（本次输出 ${tested.usage.outputTokens} token）` : ''}，设置已安全保存` : '设置已安全保存');
+    } catch (reason) {
+      if (isStructuredOutputError(reason)) setConnectionFailure(reason.diagnostics);
+      setError(reason instanceof Error ? reason.message.replace(/^Error invoking remote method '[^']+':\s*/, '').trim() : '请检查配置后重试');
+    }
     finally { setBusy(null); }
   };
   const clearApiKey = async () => {
     setBusy('save'); setMessage(''); setError('');
-    try { const result = await window.zhiji.settings.clearApiKey(); setHasApiKey(result.hasApiKey); await onSaved?.(); setMessage('已移除当前服务商的 API Key'); }
+    try { const result = await window.zhiji.settings.clearApiKey(); setHasApiKey(result.hasApiKey); setConnectionResult(null); setConnectionFailure(null); await onSaved?.(); setMessage('已移除当前服务商的 API Key'); }
     catch (reason) { setError(reason instanceof Error ? reason.message : '移除失败'); }
     finally { setBusy(null); }
   };
@@ -118,6 +134,12 @@ export function SettingsPage({ initialSection = 'general', onSaved }: { initialS
     catch (reason) { setTransferMessage(`恢复失败：${reason instanceof Error ? reason.message : '请稍后重试'}`); }
     finally { setTransferBusy(null); }
   };
+  const moveTab = (direction: 1 | -1) => {
+    const index = SETTINGS_TABS.findIndex(([value]) => value === section);
+    const next = SETTINGS_TABS[(index + direction + SETTINGS_TABS.length) % SETTINGS_TABS.length][0];
+    setSection(next);
+    window.setTimeout(() => document.getElementById(`settings-tab-${next}`)?.focus(), 0);
+  };
 
   const renderGeneral = () => <section className="card settings-panel settings-task-group">
       <div className="section-heading"><div><h3>界面主题</h3><p>跟随系统时随 Windows 设置自动切换。</p></div></div>
@@ -127,9 +149,9 @@ export function SettingsPage({ initialSection = 'general', onSaved }: { initialS
   const renderAi = () => <>
   <section className="card settings-panel ai-settings-panel">
     <div className="section-heading"><div><h3>AI 服务</h3><p>选择服务商并保存连接设置。API Key 只会写入系统安全存储。</p></div>{hasApiKey && <span className="saved-key-badge">✓ 已安全保存</span>}</div>
-    <div className="settings-fields"><Field label="服务商"><select aria-label="服务商" value={form.providerId} onChange={(event) => updateProvider(event.target.value as SaveProviderConfigInput['providerId'])}><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="custom">自定义 OpenAI 兼容接口</option></select></Field><Field label="模型"><input aria-label="模型" value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })}/></Field><Field label="API Key"><input aria-label="API Key" type="password" value={form.apiKey ?? ''} placeholder={hasApiKey ? '留空即保留当前 Key' : '输入你的 API Key'} autoComplete="new-password" onChange={(event) => setForm({ ...form, apiKey: event.target.value || undefined })}/><small>Key 不会再次显示原值。</small></Field></div>
-    <details className="settings-advanced" open={advancedOpen}><summary onClick={(event) => { event.preventDefault(); setAdvancedOpen((value) => !value); }}>高级设置</summary>{advancedOpen && <div className="settings-fields">{form.providerId === 'custom' && <Field label="API 地址"><input aria-label="API 地址" value={form.baseUrl} placeholder="https://api.example.com/v1" onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}/><small>必须使用 HTTPS；开发环境仅允许 localhost HTTP。</small></Field>}<Field label="Agent 思考模式"><select aria-label="Agent 思考模式" value={form.agentThinking} disabled={form.providerId !== 'deepseek'} onChange={(event) => setForm({ ...form, agentThinking: event.target.value as SaveProviderConfigInput['agentThinking'] })}><option value="disabled">关闭（更快、更省）</option><option value="enabled">开启（更深思考）</option></select><small>{form.providerId === 'deepseek' ? '仅影响 Agent 对话；开启后通常会增加延迟和用量。' : '当前服务商未声明 DeepSeek thinking 协议，Agent 保持关闭。'}</small></Field><div className="settings-actions"><Button variant="ghost" loading={busy === 'save'} onClick={() => void runProvider('save')}>仅保存</Button></div>{hasApiKey && <Button variant="danger" onClick={() => setConfirmClearKey(true)}>移除已保存 Key</Button>}</div>}</details>
-    {message && <StatusBanner tone="success">{message}</StatusBanner>}{error && <StatusBanner tone="error">操作失败：{error}</StatusBanner>}
+    <div className="settings-fields"><Field label="服务商"><select aria-label="服务商" value={form.providerId} onChange={(event) => updateProvider(event.target.value as SaveProviderConfigInput['providerId'])}><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="custom">自定义 OpenAI 兼容接口</option></select></Field><Field label="模型"><input aria-label="模型" value={form.model} onChange={(event) => { clearConnectionResult(); setForm({ ...form, model: event.target.value }); }}/></Field><Field label="API Key"><input aria-label="API Key" type="password" value={form.apiKey ?? ''} placeholder={hasApiKey ? '留空即保留当前 Key' : '输入你的 API Key'} autoComplete="new-password" onChange={(event) => { clearConnectionResult(); setForm({ ...form, apiKey: event.target.value || undefined }); }}/><small>Key 不会再次显示原值。</small></Field></div>
+    <details className="settings-advanced" open={advancedOpen}><summary onClick={(event) => { event.preventDefault(); setAdvancedOpen((value) => !value); }}>高级设置</summary>{advancedOpen && <div className="settings-fields">{form.providerId === 'custom' && <Field label="API 地址"><input aria-label="API 地址" value={form.baseUrl} placeholder="https://api.example.com/v1" onChange={(event) => { clearConnectionResult(); setForm({ ...form, baseUrl: event.target.value }); }}/><small>必须使用 HTTPS；开发环境仅允许 localhost HTTP。</small></Field>}<Field label="Agent 思考模式"><select aria-label="Agent 思考模式" value={form.agentThinking} disabled={form.providerId !== 'deepseek'} onChange={(event) => { clearConnectionResult(); setForm({ ...form, agentThinking: event.target.value as SaveProviderConfigInput['agentThinking'] }); }}><option value="disabled">关闭（更快、更省）</option><option value="enabled">开启（更深思考）</option></select><small>{form.providerId === 'deepseek' ? '仅影响 Agent 对话；开启后通常会增加延迟和用量。' : '当前服务商未声明 DeepSeek thinking 协议，Agent 保持关闭。'}</small></Field><div className="settings-actions"><Button variant="ghost" loading={busy === 'save'} onClick={() => void runProvider('save')}>仅保存</Button></div>{hasApiKey && <Button variant="danger" onClick={() => setConfirmClearKey(true)}>移除已保存 Key</Button>}</div>}</details>
+    {message && <StatusBanner tone="success">{message}</StatusBanner>}{error && <StatusBanner tone="error">操作失败：{error}</StatusBanner>}{connectionFailure && <StructuredDiagnostics diagnostics={connectionFailure}/>} {connectionResult && <AiConnectionDiagnostics result={connectionResult}/>}
     <div className="settings-actions"><Button variant="primary" loading={busy === 'test'} onClick={() => void runProvider('test')}>保存并测试</Button></div>
   </section>
   <section className="card settings-panel profile-summary">
@@ -146,8 +168,8 @@ export function SettingsPage({ initialSection = 'general', onSaved }: { initialS
 
   return <div className="settings-page">
     <PageHeader title="设置" description="用三个清晰的区域管理外观、AI 与本地数据。"/>
-    <div className="settings-tabs" role="tablist" aria-label="设置分类">{([['general', '通用'], ['ai', 'AI 与个性化'], ['data', '数据与隐私']] as const).map(([value, label]) => <button key={value} role="tab" aria-selected={section === value} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)}>{label}</button>)}</div>
-    <div className="settings-section" role="tabpanel">{section === 'general' ? renderGeneral() : section === 'ai' ? renderAi() : renderData()}</div>
+    <div className="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="horizontal">{SETTINGS_TABS.map(([value, label]) => <button key={value} id={`settings-tab-${value}`} role="tab" aria-controls={`settings-panel-${value}`} aria-selected={section === value} tabIndex={section === value ? 0 : -1} className={section === value ? 'is-active' : ''} onClick={() => setSection(value)} onKeyDown={(event) => { if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); moveTab(1); } if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); moveTab(-1); } }}>{label}</button>)}</div>
+    <div id={`settings-panel-${section}`} className="settings-section" role="tabpanel" aria-labelledby={`settings-tab-${section}`} tabIndex={0}>{section === 'general' ? renderGeneral() : section === 'ai' ? renderAi() : renderData()}</div>
     <footer className="settings-footer">版本 {appVersion}</footer>
     <ConfirmDialog open={confirmClearKey} title="移除已保存的 API Key？" description="移除后需要重新输入才能使用 AI 功能；其他设置保持不变。" confirmLabel="确认移除" loading={busy === 'save'} onCancel={() => setConfirmClearKey(false)} onConfirm={() => { setConfirmClearKey(false); void clearApiKey(); }}/>
     <ConfirmDialog open={confirmClearProfile} title="清空个人背景？" description="这会删除你主动保存的个人背景，不会影响日志和复盘。" confirmLabel="确认清空" loading={profileBusy} onCancel={() => setConfirmClearProfile(false)} onConfirm={() => { setConfirmClearProfile(false); void clearProfile(); }}/>

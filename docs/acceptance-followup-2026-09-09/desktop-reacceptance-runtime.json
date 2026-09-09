@@ -1,0 +1,50 @@
+{
+  "run": "desktop-reacceptance-A-to-B",
+  "runtime": "Electron dev renderer via CDP fallback",
+  "appWindow": "real Electron",
+  "dataRoot": "C:/Users/panda/AppData/Local/Temp/zhiji-desktop-reacceptance-data-20260909-1708-cdp",
+  "userDataRoot": "C:/Users/panda/AppData/Local/Temp/zhiji-desktop-reacceptance-userdata-20260909-1708-cdp",
+  "viewport": {
+    "innerWidth": 1186,
+    "innerHeight": 718,
+    "devicePixelRatio": 1.25,
+    "zoom": 1.25
+  },
+  "syntheticInput": {
+    "A": "今天完成了整理桌面并提交周报。整理完成后我觉得轻松。我发现先处理最小任务更容易开始。明天继续先写五分钟计划。",
+    "B": "今天完成了整理桌面并提交周报。整理完成后我觉得轻松。我发现先处理最小任务更容易开始。明天继续先写五分钟计划。 下午又完成了归档。"
+  },
+  "screenshots": [
+    "desktop-reacceptance-A.png",
+    "desktop-reacceptance-B.png"
+  ],
+  "visibleChecks": {
+    "A": {
+      "feedbackGenerated": true,
+      "containsObservation": true,
+      "containsAction": true
+    },
+    "B": {
+      "feedbackGenerated": true,
+      "containsObservation": true,
+      "containsAction": true
+    }
+  },
+  "mock": {
+    "requests": 2,
+    "usage": [
+      {
+        "request": 1,
+        "inputTokens": 112,
+        "outputTokens": 42,
+        "cachedInputTokens": 0
+      },
+      {
+        "request": 2,
+        "inputTokens": 113,
+        "outputTokens": 42,
+        "cachedInputTokens": 0
+      }
+    ]
+  }
+}

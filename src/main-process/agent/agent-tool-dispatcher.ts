@@ -181,6 +181,7 @@ export class AgentToolDispatcher {
         const approval = this.consumeApproval(request.sessionId, request.input.approvalId, 'reviews.generate-periodic', request.input.previewToken);
         const result = await this.deps.generatePeriodicReview.execute({ ...request.input, model: (await this.deps.configureAi.getPublicConfig()).model, previewToken: approval.previewToken }, signal);
         if (result.kind === 'clarification') return { kind: 'workflow.clarification', workflow: 'reviews.generate-periodic', question: result.question };
+        if (result.kind === 'error') throw appError({ code: 'INVALID_MODEL_OUTPUT', message: result.message, diagnostics: result.diagnostics });
         return { kind: 'workflow.completed', workflow: 'reviews.generate-periodic', review: this.reviewSummary(result.review), navigation: this.reviewNavigation(result.review) };
       }
       case 'reviews.preview-insight': {

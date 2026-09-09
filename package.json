@@ -1,7 +1,7 @@
 {
   "name": "zhiji-desktop-agent",
   "productName": "知己",
-  "version": "2.6.5",
+  "version": "2.6.15",
   "description": "本地优先、内置受控 Agent 的 AI 日志复盘客户端",
   "main": ".vite/build/main.js",
   "private": true,
@@ -13,6 +13,7 @@
     "lint": "eslint --ext .ts,.tsx .",
     "test": "vitest run",
     "provider:smoke": "vitest run --config vite.smoke.config.ts --testTimeout 120000",
+    "benchmark:memory": "vite-node scripts/benchmark-memory-search.ts",
     "pretest:e2e": "electron-forge package",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
@@ -87,8 +88,6 @@
     "@deepseek-ai/dsh-tools": "0.1.0-rc.8",
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
     "@deepseek-ai/dsh-user-approval": "0.1.0-rc.8",
-    "@langchain/core": "^1.2.7",
-    "@langchain/langgraph": "^1.4.9",
     "@tavily/core": "0.7.7",
     "adm-zip": "^0.6.0",
     "electron-squirrel-startup": "^1.0.1",
@@ -98,6 +97,7 @@
     "react-dom": "^19.2.8",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
+    "write-file-atomic": "6.0.0",
     "zod": "^4.4.3"
   }
 }

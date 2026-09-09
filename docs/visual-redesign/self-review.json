@@ -1,0 +1,58 @@
+{
+  "scope": "offline sample self review",
+  "viewports": [
+    {
+      "name": "journal-light",
+      "viewport": [
+        1186,
+        718
+      ],
+      "overflowX": false,
+      "editorHeight": 270,
+      "editorScrollHeight": 270,
+      "saveBottom": 643
+    },
+    {
+      "name": "journal-dark",
+      "viewport": [
+        1186,
+        718
+      ],
+      "overflowX": false,
+      "editorHeight": 270,
+      "editorScrollHeight": 270,
+      "saveBottom": 643
+    },
+    {
+      "name": "journal-compact",
+      "viewport": [
+        960,
+        600
+      ],
+      "overflowX": false,
+      "editorHeight": 225,
+      "editorScrollHeight": 225,
+      "saveBottom": 544
+    },
+    {
+      "name": "journal-wide",
+      "viewport": [
+        1440,
+        900
+      ],
+      "overflowX": false,
+      "editorHeight": 420,
+      "editorScrollHeight": 420,
+      "saveBottom": 821
+    }
+  ],
+  "dateTitle": "9月9日",
+  "dateWeekday": "星期三",
+  "dateFocusRestored": true,
+  "templateEscapeFocus": true,
+  "editorFocusPreserved": true,
+  "emptyDisabled": true,
+  "longTextScrolls": true,
+  "longTextSaveBottom": 544,
+  "errors": []
+}

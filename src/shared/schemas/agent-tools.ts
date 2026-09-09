@@ -55,7 +55,7 @@ const WebReadInputSchema = z.object({ searchSessionId: SearchSessionIdSchema, so
 const validDateRange = (value: { start: string; end: string }) => value.start <= value.end;
 const JournalCreateInputSchema = z.object({ date: IsoDate, body: z.string().trim().min(1).max(100_000), projectIds: z.array(StableProjectId).max(20).default([]) }).strict();
 const JournalUpdateInputSchema = JournalCreateInputSchema.extend({ id: StableJournalId, expectedUpdatedAt: IsoDateTime }).strict();
-const DailyReviewGenerateInputSchema = z.object({ date: IsoDate, regenerate: z.boolean().optional() }).strict();
+const DailyReviewGenerateInputSchema = z.object({ date: IsoDate, journalId: StableJournalId.optional(), regenerate: z.boolean().optional() }).strict();
 const PeriodicReviewBaseSchema = z.object({ type: z.enum(['weekly', 'monthly', 'project']), start: IsoDate, end: IsoDate, projectId: StableProjectId.optional() }).strict().refine((value) => value.start <= value.end, '开始日期不能晚于结束日期');
 const PeriodicReviewPreviewInputSchema = PeriodicReviewBaseSchema;
 const PeriodicReviewGenerateInputSchema = PeriodicReviewBaseSchema.extend({ previewToken: z.string().uuid(), approvalId: ApprovalIdSchema }).strict().refine((value) => value.start <= value.end, '开始日期不能晚于结束日期');

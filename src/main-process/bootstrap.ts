@@ -2,7 +2,7 @@ import { app, dialog, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import { CreateJournal, UpdateJournal } from './application/save-journal';
 import { registerHandlers } from './ipc/register-handlers';
-import { MarkdownJournalRepository } from './infrastructure/markdown/journal-repository';
+import { MarkdownJournalRepository, recoverJournalResidues } from './infrastructure/markdown/journal-repository';
 import { JsonProjectRepository } from './infrastructure/markdown/project-repository';
 import { CredentialStore } from './infrastructure/credentials/credential-store';
 import { ConfigureAi } from './application/configure-ai';
@@ -26,12 +26,19 @@ import { AgentModelTransport } from './agent/agent-model-transport';
 import { ElectronAgentRuntime } from './agent/electron-agent-runtime';
 import { AgentToolDispatcher } from './agent/agent-tool-dispatcher';
 import { AgentMemorySearchService } from './agent/agent-memory-search-service';
+import { MaintenanceCoordinator } from './infrastructure/lifecycle/maintenance-coordinator';
+import type { IpcSourceGuard } from './ipc/ipc-source-guard';
 
-export async function bootstrap() {
+export async function bootstrap(sourceGuard: IpcSourceGuard) {
   const config = new DataRootConfig();
   const loaded = await config.load();
-  const dataRootHolder = new DataRootHolder(config, loaded.dataRoot);
+  const maintenance = new MaintenanceCoordinator();
+  const dataRootHolder = new DataRootHolder(config, loaded.dataRoot, maintenance);
   const dataRoot = dataRootHolder.get();
+  const residueRecovery = await recoverJournalResidues(dataRoot);
+  if (residueRecovery.conflicts.length || residueRecovery.ambiguous.length || residueRecovery.failed.length) {
+    console.warn('知己日志残留未自动恢复：', JSON.stringify({ conflicts: residueRecovery.conflicts, ambiguous: residueRecovery.ambiguous, failed: residueRecovery.failed }));
+  }
   const trashItem = (target: string) => shell.trashItem(target);
   const journals = new MarkdownJournalRepository(dataRoot, trashItem);
   const projects = new JsonProjectRepository(dataRoot, trashItem);
@@ -53,7 +60,8 @@ export async function bootstrap() {
   const dataDirectory = new DataDirectoryService(dataRoot, (target) => shell.openPath(target));
   const agentToolDispatcher = new AgentToolDispatcher({ journals, reviews, projects, verifiedPatterns, memorySearch, webSearch, createJournal, updateJournal, generateDailyReview, generatePeriodicReview, generateInsightReview, configureAi });
   const agentSessionRoot = path.join(dataRoot, 'agent', 'sessions');
-  const agentFacade = new AgentFacade(new ElectronAgentRuntime({ sessionRoot: agentSessionRoot }), new AgentModelTransport(configureAi), agentToolDispatcher, { sessionRoot: agentSessionRoot, trashItem });
-  registerHandlers({ journals, projects, reviews, profile, reviewTasks, generateDailyReview, generatePeriodicReview, generateInsightReview, verifiedPatterns, webSearch, templates, dataRootHolder, dataRootConfig: config, appVersion: app.getVersion(), createJournal, updateJournal, configureAi, transfer, dataDirectory, dialog, agentFacade });
+  const agentFacade = new AgentFacade(new ElectronAgentRuntime({ sessionRoot: agentSessionRoot }), new AgentModelTransport(configureAi), agentToolDispatcher, { sessionRoot: agentSessionRoot, trashItem }, maintenance);
+  maintenance.setLifecycle(agentFacade);
+  registerHandlers({ journals, projects, reviews, profile, reviewTasks, generateDailyReview, generatePeriodicReview, generateInsightReview, verifiedPatterns, webSearch, templates, dataRootHolder, dataRootConfig: config, appVersion: app.getVersion(), createJournal, updateJournal, configureAi, transfer, dataDirectory, dialog, agentFacade, maintenance, sourceGuard, memorySearch });
   return { agentFacade };
 }

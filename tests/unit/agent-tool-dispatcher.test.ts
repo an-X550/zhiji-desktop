@@ -101,8 +101,9 @@ describe('AgentToolDispatcher', () => {
     expect(created).toMatchObject({ kind: 'workflow.completed', workflow: 'journals.create', journal: { id: 'journal_created' }, navigation: { view: 'journal', intent: 'records' } });
     const daily = (dispatcher as unknown as { deps: { generateDailyReview: { execute: ReturnType<typeof vi.fn> } } }).deps.generateDailyReview;
     daily.execute.mockResolvedValue({ kind: 'review', review: { schemaVersion: 2, id: 'review_daily1', type: 'daily', periodStart: '2026-08-20', periodEnd: '2026-08-20', sourceIds: ['journal_created'], sourceVersions: { journal_created: 'v1' }, projectId: null, provider: 'openai-compatible', model: 'test', promptVersion: 'daily-review-v3', createdAt: '2026-08-20T00:00:00.000Z', body: '今日反馈' } });
-    const feedback = await dispatcher.dispatch(request('reviews.generate-daily', { date: '2026-08-20' }));
+    const feedback = await dispatcher.dispatch(request('reviews.generate-daily', { date: '2026-08-20', journalId: 'journal_a1' }));
     expect(feedback).toMatchObject({ kind: 'workflow.completed', workflow: 'reviews.generate-daily', review: { id: 'review_daily1' }, navigation: { view: 'journal', intent: 'records' } });
+    expect(daily.execute).toHaveBeenCalledWith({ date: '2026-08-20', journalId: 'journal_a1', model: 'test' }, undefined);
   });
 
   it('requires a Main Process approval before a periodic review can be written', async () => {
