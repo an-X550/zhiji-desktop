@@ -1,6 +1,6 @@
 # 知己桌面端：安装 · 打包 · 分发指南
 
-> 适用版本：当前源码与本次发布均为 v2.6.15。本文回答三个问题：怎么装、怎么打包、怎么发给别人；并附当前产品的文件职责清单。
+> 适用版本：当前源码与本次发布均为 v2.6.16。本文回答三个问题：怎么装、怎么打包、怎么发给别人；并附当前产品的文件职责清单。
 
 ---
 
@@ -10,8 +10,8 @@
 
 | 形态 | 路径 | 说明 |
 | --- | --- | --- |
-| **v2.6.15 安装版** | `out/release-candidate/v2.6.15/Zhiji-Setup-v2.6.15.exe` | 本次 Squirrel 发布包，三件套来自同一次 `npm run make` |
-| **v2.6.15 packaged-asar** | `out/知己-win32-x64/知己.exe` | 本地免安装版，已通过打包 E2E |
+| **v2.6.16 安装版** | `out/release-candidate/v2.6.16/Zhiji-Setup-v2.6.16.exe` | 本次 Squirrel 发布包，三件套来自同一次 `npm run make` |
+| **v2.6.16 packaged-asar** | `out/知己-win32-x64/知己.exe` | 本地免安装版，已通过打包 E2E |
 
 ### 安装版流程（Setup.exe）
 
@@ -26,7 +26,7 @@
 
 > 两种形态共用同一份本地数据（默认 `文档\知己`），切换形态不会丢数据。
 
-本次 v2.6.15 已生成并验证 packaged-asar 与 Squirrel 三件套；仍不要把未实际安装的免安装目录称作已安装版本。
+本次 v2.6.16 已生成并验证 packaged-asar 与 Squirrel 三件套；仍不要把未实际安装的免安装目录称作已安装版本。
 
 ---
 
@@ -161,13 +161,13 @@ Setup.exe                # 引导安装器
 每次准备分发时，先完成 `npm run package`、`npm run test:e2e`，再执行 `npm run make`。确认 `out/make/squirrel.windows/x64/` 是本次新生成的目录后，把本次三件套复制到版本独立目录：
 
 ```text
-out/release-candidate/v2.6.15/
-├─ Zhiji-Setup-v2.6.15.exe
-├─ zhiji-2.6.15-full.nupkg
+out/release-candidate/v2.6.16/
+├─ Zhiji-Setup-v2.6.16.exe
+├─ zhiji-2.6.16-full.nupkg
 └─ RELEASES
 ```
 
-只用该目录中的 `Zhiji-Setup-v2.6.15.exe` 做全新用户数据和核心功能验收；不要把旧 `out/make` 中的 `Setup.exe` 当成本次构建。旧版本 RC 保留不覆盖。远程发布只上传已经验收的同一份文件。
+只用该目录中的 `Zhiji-Setup-v2.6.16.exe` 做全新用户数据和核心功能验收；不要把旧 `out/make` 中的 `Setup.exe` 当成本次构建。旧版本 RC 保留不覆盖。远程发布只上传已经验收的同一份文件。
 
 ---
 

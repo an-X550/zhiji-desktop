@@ -4,6 +4,13 @@ last_updated: 2026-08-22
 
 # 更新记录
 
+## [2026-09-09] [修复] 将页面缩放固定为跨安装路径的应用配置（v2.6.15 -> v2.6.16）
+
+- 修复免安装参考版保留 125% 页面缩放、Squirrel 安装版却按 100% 页面缩放启动导致字号偏小的问题；默认应用缩放为 125%，不修改既有页面 CSS 或 Windows DPI。
+- 将用户调整后的缩放保存到 `%APPDATA%\\知己\\zhiji-config.json`，与 `file://` 页面路径、安装目录和版本目录无关；每次加载以应用配置绝对设置缩放，避免旧 Electron 路径缩放与新默认值叠加。
+- 保留 Ctrl+加号、Ctrl+减号和 Ctrl+0 调整/恢复缩放，并补充缩放控制单测；旧配置只补写缩放字段，不删除整个 Preferences 或业务数据。
+- 强制 Windows Squirrel 安装目录使用 ASCII `zhiji.exe`，避免中文可执行文件名在 nupkg 解压时损坏。
+
 ## [2026-08-22] [配置] 将 Desktop Agent 最终统一为 zhiji 命名空间（v2.6.5 -> v2.6.5）
 
 - GitHub 仓库、README、安装说明、Release、Issues、主页、Git remote 和 package metadata 统一到 `an-X550/zhiji-Desktop-Agent` / `zhiji-desktop-agent`。

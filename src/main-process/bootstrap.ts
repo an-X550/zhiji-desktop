@@ -63,5 +63,5 @@ export async function bootstrap(sourceGuard: IpcSourceGuard) {
   const agentFacade = new AgentFacade(new ElectronAgentRuntime({ sessionRoot: agentSessionRoot }), new AgentModelTransport(configureAi), agentToolDispatcher, { sessionRoot: agentSessionRoot, trashItem }, maintenance);
   maintenance.setLifecycle(agentFacade);
   registerHandlers({ journals, projects, reviews, profile, reviewTasks, generateDailyReview, generatePeriodicReview, generateInsightReview, verifiedPatterns, webSearch, templates, dataRootHolder, dataRootConfig: config, appVersion: app.getVersion(), createJournal, updateJournal, configureAi, transfer, dataDirectory, dialog, agentFacade, maintenance, sourceGuard, memorySearch });
-  return { agentFacade };
+  return { agentFacade, config, zoomFactor: loaded.zoomFactor };
 }

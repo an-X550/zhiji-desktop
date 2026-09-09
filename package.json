@@ -1,7 +1,7 @@
 {
   "name": "zhiji-desktop-agent",
   "productName": "知己",
-  "version": "2.6.15",
+  "version": "2.6.16",
   "description": "本地优先、内置受控 Agent 的 AI 日志复盘客户端",
   "main": ".vite/build/main.js",
   "private": true,

@@ -113,7 +113,7 @@ test('settings information architecture and journal template flow are usable in 
     await expect(page.getByRole('button', { name: '创建备份' })).toBeVisible();
     await expect(page.getByRole('button', { name: '从备份恢复' })).toBeVisible();
     await expect(page.getByText(/发布地址|保存地址|检查更新/)).toHaveCount(0);
-    await expect(page.getByText('版本 2.6.15')).toBeVisible();
+    await expect(page.getByText(/^版本 \d+\.\d+\.\d+$/)).toBeVisible();
 
     await page.getByRole('button', { name: '日志', exact: true }).click();
     const previousDate = await page.evaluate(() => { const date = new Date(); date.setDate(date.getDate() - 1); return date.toISOString().slice(0, 10); });
@@ -165,6 +165,9 @@ test('history keeps long records inside the available columns at wide and compac
       await window.zhiji.journals.create({ date: '2026-09-07', body: `${body}\n第二条隔离记录`, projectIds: [] });
     });
     await page.reload();
+    // This case asserts the layout breakpoint itself; keep page zoom explicit
+    // so the 125% application default does not masquerade as a narrow window.
+    await running.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1));
     await page.getByRole('button', { name: '日志', exact: true }).click();
     await page.getByRole('button', { name: '过去日志' }).click();
     await expect(page.locator('.history-layout')).toBeVisible();

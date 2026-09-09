@@ -6,6 +6,9 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
   packagerConfig: {
+    // Squirrel extraction can corrupt Chinese executable names on Windows;
+    // keep the installed process path ASCII-stable across releases.
+    executableName: 'zhiji',
     asar: {
       // Koffi is used by DSH's Windows durable JSONL publisher and loads a
       // native .node binary; native modules cannot be dlopen'ed from asar.

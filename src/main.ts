@@ -5,6 +5,7 @@ import { createWindowOptions } from './main-process/window-options';
 import { bootstrap } from './main-process/bootstrap';
 import type { AgentFacade } from './main-process/agent/agent-facade';
 import { createApplicationPagePolicy, IpcSourceGuard } from './main-process/ipc/ipc-source-guard';
+import { WindowZoomController } from './main-process/window-zoom';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -18,12 +19,14 @@ if (!hasSingleInstanceLock) {
 } else {
 const pagePolicy = createApplicationPagePolicy(MAIN_WINDOW_VITE_DEV_SERVER_URL, path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
 const sourceGuard = new IpcSourceGuard(pagePolicy);
+let windowZoomController: WindowZoomController | undefined;
 
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow(
     createWindowOptions(path.join(__dirname, 'preload.js')),
   );
+  windowZoomController?.attach(mainWindow);
   sourceGuard.registerWindow(mainWindow);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -54,7 +57,9 @@ let agentFacade: AgentFacade | undefined;
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', async () => {
-  ({ agentFacade } = await bootstrap(sourceGuard));
+  const bootstrapped = await bootstrap(sourceGuard);
+  agentFacade = bootstrapped.agentFacade;
+  windowZoomController = new WindowZoomController(bootstrapped.config, bootstrapped.zoomFactor);
   createWindow();
 });
 

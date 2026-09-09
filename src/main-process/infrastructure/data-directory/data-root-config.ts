@@ -3,11 +3,13 @@ import path from 'node:path';
 import { app } from 'electron';
 import { z } from 'zod';
 import { atomicWriteUtf8 } from '../markdown/atomic-write';
+import { DEFAULT_ZOOM_FACTOR } from '../../window-zoom';
 
 const ConfigSchema = z.object({
   schemaVersion: z.literal(1),
   dataRoot: z.string().min(1),
   updateUrl: z.string().url().optional(),
+  zoomFactor: z.number().finite().min(0.5).max(3).optional(),
 }).strict();
 
 export type ZhijiConfig = z.infer<typeof ConfigSchema>;
@@ -26,11 +28,14 @@ export class DataRootConfig {
     try {
       const raw = await readFile(this.target, 'utf8');
       const parsed = ConfigSchema.parse(JSON.parse(raw));
-      return parsed;
+      if (parsed.zoomFactor !== undefined) return parsed;
+      const migrated = { ...parsed, zoomFactor: DEFAULT_ZOOM_FACTOR };
+      await this.save(migrated);
+      return migrated;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    const fallback: ZhijiConfig = { schemaVersion: 1, dataRoot: process.env.ZHIJI_DATA_ROOT ?? DEFAULT_DATA_ROOT() };
+    const fallback: ZhijiConfig = { schemaVersion: 1, dataRoot: process.env.ZHIJI_DATA_ROOT ?? DEFAULT_DATA_ROOT(), zoomFactor: DEFAULT_ZOOM_FACTOR };
     await this.save(fallback);
     return fallback;
   }
